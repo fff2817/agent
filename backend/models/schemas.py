@@ -34,6 +34,14 @@ class ReActStepSchema(BaseModel):
     final_answer: str | None = Field(None, description="最终回答（仅最后一步可能有）")
 
 
+class RetrievedMemorySchema(BaseModel):
+    rank: int
+    score: float
+    content: str
+    memory_type: str
+    source: str = Field("", description="记忆来源")
+
+
 class ChatResponse(BaseModel):
     response: str = Field(..., description="Assistant reply from the Agent")
     session_id: str = Field(..., description="Session ID — save on client for next request")
@@ -230,14 +238,6 @@ class MemoryOverviewResponse(BaseModel):
         default_factory=list,
         description="该用户全部长期记忆",
     )
-
-
-class RetrievedMemorySchema(BaseModel):
-    rank: int
-    score: float
-    content: str
-    memory_type: str
-    source: str = Field("", description="记忆来源")
 
 
 class MemoryAskRequest(BaseModel):

@@ -3,7 +3,14 @@
 
 from __future__ import annotations
 
-from auth.user_store import get_user_store
+import sys
+from pathlib import Path
+
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+from auth.user_store import get_user_store  # noqa: E402
 
 DEMO_USERNAME = "demo"
 DEMO_PASSWORD = "Demo2026!"
