@@ -13,6 +13,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("AUTH_DISABLED", "true")
     monkeypatch.setenv("USERS_DB_PATH", str(tmp_path / "users.db"))
     monkeypatch.setenv("SESSIONS_DB_PATH", str(tmp_path / "sessions.db"))
+    monkeypatch.setenv("CONVERSATIONS_DB_PATH", str(tmp_path / "conversations.db"))
     monkeypatch.setenv("MEMORY_STORE_PATH", str(tmp_path / "memory"))
     monkeypatch.setenv("RAG_STORE_PATH", str(tmp_path / "rag"))
 
@@ -23,14 +24,17 @@ def client(tmp_path, monkeypatch):
     # 清除单例缓存
     import memory.session_store as ss
     import auth.user_store as us
+    from conversation.store import reset_conversation_store
 
     ss._store = ss.SessionStore(db_path=tmp_path / "sessions.db")
     us._store = us.UserStore(db_path=tmp_path / "users.db")
+    reset_conversation_store()
 
     from main import app
 
     yield TestClient(app)
 
+    reset_conversation_store()
     get_settings.cache_clear()
 
 

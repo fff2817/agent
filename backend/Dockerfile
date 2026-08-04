@@ -18,6 +18,7 @@ ENV PYTHONUNBUFFERED=1 \
     MEMORY_STORE_PATH=/data/memory/store \
     USERS_DB_PATH=/data/data/users.db \
     SESSIONS_DB_PATH=/data/data/sessions.db \
+    CONVERSATIONS_DB_PATH=/data/data/conversations.db \
     EVAL_DB_PATH=/data/data/evaluations.db \
     SERVE_FRONTEND=false \
     AUTH_DISABLED=false \

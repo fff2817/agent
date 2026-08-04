@@ -24,6 +24,7 @@ from agent.executor import execute
 from agent.memory import AgentMemory
 from agent.planner import plan, plan_stream
 from agent.prompts import REACT_SYSTEM_PROMPT
+from auth.context import set_current_user_id
 from core.config import get_settings
 from memory.prompt_builder import build_memory_system_section
 
@@ -73,6 +74,7 @@ def run_react_agent(
     *,
     history: list[dict] | None = None,
     memory_hints: list[str] | None = None,
+    user_id: str | None = None,
 ) -> ReActResult:
     """
     ReAct Agent 主入口。
@@ -80,6 +82,7 @@ def run_react_agent(
     参数:
         user_message: 用户输入
         history:      Session 历史 messages（user/assistant 交替），不含当前消息
+        user_id:      当前用户 ID（供 search_docs 等工具读取知识库）
 
     返回:
         ReActResult — 含 response 和 trace
@@ -87,10 +90,15 @@ def run_react_agent(
     异常:
         ValueError: 配置错误或超过最大步数
     """
+    if user_id:
+        set_current_user_id(user_id)
+
     settings = get_settings()
     history = history or []
 
     logger.info("[Agent] 收到用户问题: %s", user_message)
+    if user_id:
+        logger.info("[Agent] 绑定用户上下文: %s", user_id)
     if history:
         logger.info("[Agent] 注入 Session 历史: %d 条 messages", len(history))
     if memory_hints:
@@ -193,6 +201,7 @@ def run_react_agent_stream(
     history: list[dict] | None = None,
     memory_hints: list[str] | None = None,
     should_cancel: Callable[[], bool] | None = None,
+    user_id: str | None = None,
 ) -> Iterator[dict]:
     """
     可流式、可取消的 ReAct Agent 入口。
@@ -202,6 +211,11 @@ def run_react_agent_stream(
       - {"type": "step", "step": {...}}
       - {"type": "done", "response": "...", "steps": [...]}
     """
+    # 必须在 Agent 线程内设置：SSE 在子线程跑 producer，仅靠请求 ContextVar 会丢失
+    if user_id:
+        set_current_user_id(user_id)
+        logger.info("[Agent] 流式绑定用户上下文: %s", user_id)
+
     settings = get_settings()
     history = history or []
     partial_response = ""

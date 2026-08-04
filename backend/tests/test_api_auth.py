@@ -15,6 +15,7 @@ def client(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("AUTH_SECRET", "test-secret")
     monkeypatch.setenv("USERS_DB_PATH", str(tmp_path / "users.db"))
     monkeypatch.setenv("SESSIONS_DB_PATH", str(tmp_path / "sessions.db"))
+    monkeypatch.setenv("CONVERSATIONS_DB_PATH", str(tmp_path / "conversations.db"))
     monkeypatch.setenv("MEMORY_STORE_PATH", str(tmp_path / "memory"))
     monkeypatch.setenv("RAG_STORE_PATH", str(tmp_path / "rag"))
 
@@ -22,10 +23,15 @@ def client(tmp_path: Path, monkeypatch):
 
     get_settings.cache_clear()
 
+    from conversation.store import reset_conversation_store
+
+    reset_conversation_store()
+
     from main import app
 
     yield TestClient(app)
 
+    reset_conversation_store()
     get_settings.cache_clear()
 
 

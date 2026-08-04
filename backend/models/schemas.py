@@ -21,7 +21,55 @@ class AuthResponse(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="User message to send to the LLM")
-    session_id: str | None = Field(None, description="Session ID for multi-turn memory; omit to start new")
+    session_id: str | None = Field(
+        None,
+        description="Session ID for multi-turn memory; omit to start new",
+    )
+    conversation_id: str | None = Field(
+        None,
+        description="Conversation ID（与 session_id 同一 UUID）；优先于 session_id",
+    )
+
+
+class ConversationSummarySchema(BaseModel):
+    conversation_id: str
+    title: str
+    created_at: str
+    updated_at: str
+    message_count: int = 0
+
+
+class ConversationMessageSchema(BaseModel):
+    id: str
+    role: str
+    content: str
+    created_at: str
+    meta: dict = Field(default_factory=dict)
+
+
+class ConversationDetailSchema(BaseModel):
+    conversation_id: str
+    title: str
+    created_at: str
+    updated_at: str
+    message_count: int = 0
+    messages: list[ConversationMessageSchema] = Field(default_factory=list)
+
+
+class ConversationCreateResponse(BaseModel):
+    conversation_id: str
+    title: str
+    created_at: str
+    updated_at: str
+    message_count: int = 0
+
+
+class ConversationRenameRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=80)
+
+
+class ConversationListResponse(BaseModel):
+    conversations: list[ConversationSummarySchema] = Field(default_factory=list)
 
 
 class ReActStepSchema(BaseModel):
@@ -45,6 +93,10 @@ class RetrievedMemorySchema(BaseModel):
 class ChatResponse(BaseModel):
     response: str = Field(..., description="Assistant reply from the Agent")
     session_id: str = Field(..., description="Session ID — save on client for next request")
+    conversation_id: str = Field(
+        ...,
+        description="Conversation ID（与 session_id 相同，供聊天历史使用）",
+    )
     user_id: str = Field(..., description="Current user ID")
     steps: list[ReActStepSchema] = Field(
         default_factory=list,
@@ -203,14 +255,14 @@ class DocumentUploadResponse(BaseModel):
     status: str = Field(..., description="Upload status, e.g. ok")
     doc_id: str = Field(..., description="Logical document ID for routing")
     filename: str = Field(..., description="Saved document filename")
-    file_type: str = Field(..., description="Document type: pdf, docx, txt, markdown")
+    file_type: str = Field(..., description="Document type: pdf, docx, txt, markdown, image")
     chunks_added: int = Field(..., description="Number of chunks added in this upload")
     total_chunks: int = Field(..., description="Total chunks in the vector store")
 
 
 class DocumentItemSchema(BaseModel):
     filename: str = Field(..., description="Document filename")
-    file_type: str = Field(..., description="Document type: pdf, docx, txt, markdown")
+    file_type: str = Field(..., description="Document type: pdf, docx, txt, markdown, image")
     size: int = Field(..., description="File size in bytes")
     uploaded_at: float = Field(..., description="Last modified timestamp (Unix seconds)")
 

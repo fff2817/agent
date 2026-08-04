@@ -33,6 +33,11 @@ def _build_client() -> OpenAI:
     return OpenAI(**client_kwargs)
 
 
+def get_openai_client() -> OpenAI:
+    """返回配置好的 OpenAI 兼容客户端（供视觉解析等复用）。"""
+    return _build_client()
+
+
 def chat_completion(
     messages: list[dict],
     *,

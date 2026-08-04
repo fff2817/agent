@@ -10,6 +10,7 @@ SSE 流式响应工具 — 供 /chat/stream、/rag/ask/stream、/memory/ask/stre
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import logging
 import queue
@@ -85,7 +86,9 @@ def bridge_sync_iterator_to_sse(
                 )
                 event_queue.put(handler())
 
-        thread = threading.Thread(target=worker, daemon=True)
+        # 复制当前请求的 ContextVar（含 user_id），否则工具链在子线程拿不到身份
+        ctx = contextvars.copy_context()
+        thread = threading.Thread(target=ctx.run, args=(worker,), daemon=True)
         thread.start()
 
         for event in initial_events or []:

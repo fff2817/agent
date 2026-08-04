@@ -223,11 +223,18 @@ def _register_default_parsers() -> None:
     """
     # 仅在首次需要时 import，减少启动开销
     from file_parser.docx_parser import DocxParser
+    from file_parser.image_parser import ImageParser
     from file_parser.markdown_parser import MarkdownParser
     from file_parser.pdf_parser import PdfParser
     from file_parser.txt_parser import TxtParser
 
-    for parser in (PdfParser(), DocxParser(), TxtParser(), MarkdownParser()):
+    for parser in (
+        PdfParser(),
+        DocxParser(),
+        TxtParser(),
+        MarkdownParser(),
+        ImageParser(),
+    ):
         registry.register(parser)
 
 

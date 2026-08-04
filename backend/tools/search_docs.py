@@ -112,6 +112,10 @@ def run_search_docs(
 
     user_id = get_current_user_id()
     if not user_id:
+        logger.error(
+            "[Tool] search_docs 缺少 user_id（ContextVar 未设置），query=%r",
+            query,
+        )
         return "Error: 未识别用户身份，无法检索文档。"
 
     ensure_catalog_synced(user_id)

@@ -7,10 +7,11 @@ import { ACCEPT_ATTR, formatFileSize, getFileIcon, getFileTypeLabel } from '../u
 const emit = defineEmits(['documents-change'])
 
 const inputRef = ref(null)
-const { documents, loadingList, uploadQueue, loadDocuments, uploadFiles, isUploading } =
+const { documents, loadingList, uploadQueue, loadDocuments, uploadFiles, isUploading, removeDocument } =
   useUpload()
 
 const uploading = computed(() => isUploading())
+const deletingName = ref('')
 
 onMounted(() => {
   if (getAuthToken()) {
@@ -31,6 +32,18 @@ async function handleFileChange(event) {
   emit('documents-change')
 }
 
+async function handleDelete(filename) {
+  if (!filename || deletingName.value) return
+  if (!window.confirm(`确定从知识库删除「${filename}」？此操作不可恢复。`)) return
+  deletingName.value = filename
+  try {
+    const ok = await removeDocument(filename)
+    if (ok) emit('documents-change')
+  } finally {
+    deletingName.value = ''
+  }
+}
+
 /** 供父组件在登录/登出后刷新列表 */
 async function refresh() {
   if (getAuthToken()) {
@@ -44,11 +57,11 @@ defineExpose({ refresh })
 </script>
 
 <template>
-  <section class="border-b border-gray-200 bg-gray-50 px-3 py-3 sm:px-5">
+  <section class="upload-panel-embed border-b border-gray-200 bg-white px-3 py-3">
     <div class="mb-3">
       <h2 class="text-sm font-semibold text-gray-900">知识库</h2>
       <p class="mt-1 text-xs text-gray-500">
-        上传 PDF、DOCX、TXT、MD 文档，供 Agent 通过 search_docs 检索
+        上传 PDF、DOCX、TXT、MD 或图片（PNG/JPG/WEBP/GIF），供 Agent 检索
       </p>
     </div>
 
@@ -140,12 +153,23 @@ defineExpose({ refresh })
           :key="doc.filename"
           class="flex items-center justify-between gap-2 rounded px-1 py-0.5 text-xs hover:bg-gray-100 sm:text-sm"
         >
-          <span class="truncate">
+          <span class="min-w-0 truncate">
             {{ getFileIcon(doc.fileType || doc.filename) }}
             {{ doc.filename }}
           </span>
-          <span class="shrink-0 text-[10px] text-gray-400 sm:text-xs">
-            {{ getFileTypeLabel(doc.filename) }} · {{ formatFileSize(doc.size) }}
+          <span class="flex shrink-0 items-center gap-2">
+            <span class="text-[10px] text-gray-400 sm:text-xs">
+              {{ getFileTypeLabel(doc.filename) }} · {{ formatFileSize(doc.size) }}
+            </span>
+            <button
+              type="button"
+              class="rounded px-1.5 py-0.5 text-[10px] text-red-600 hover:bg-red-50 disabled:opacity-50 sm:text-xs"
+              :disabled="deletingName === doc.filename"
+              :aria-label="`删除 ${doc.filename}`"
+              @click="handleDelete(doc.filename)"
+            >
+              {{ deletingName === doc.filename ? '…' : '删除' }}
+            </button>
           </span>
         </li>
       </ul>

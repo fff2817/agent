@@ -71,10 +71,22 @@ export function setSessionId(sessionId) {
 }
 
 /**
- * 清除 session（开始新对话）
+ * 清除 session / conversation（开始新对话）
  */
 export function clearSessionId() {
   localStorage.removeItem(SESSION_KEY);
+}
+
+export function getConversationId() {
+  return getSessionId();
+}
+
+export function setConversationId(id) {
+  setSessionId(id);
+}
+
+export function clearConversationId() {
+  clearSessionId();
 }
 
 /**
@@ -143,13 +155,15 @@ export async function chatAPI(message, sessionId = getSessionId()) {
   const { data } = await client.post('/chat', {
     message,
     session_id: sessionId || null,
+    conversation_id: sessionId || null,
   });
-  if (data.session_id) {
-    setSessionId(data.session_id);
+  if (data.conversation_id || data.session_id) {
+    setSessionId(data.conversation_id || data.session_id);
   }
   return {
     response: data.response,
     sessionId: data.session_id,
+    conversationId: data.conversation_id || data.session_id,
     userId: data.user_id,
     steps: data.steps || [],
     retrievedMemories: data.retrieved_memories || [],
@@ -167,9 +181,70 @@ export async function chatAPI(message, sessionId = getSessionId()) {
 export async function chatStreamAPI(message, sessionId = getSessionId(), { signal, onEvent } = {}) {
   await postSSE(
     `${API_BASE_URL}/chat/stream`,
-    { message, session_id: sessionId || null },
+    {
+      message,
+      session_id: sessionId || null,
+      conversation_id: sessionId || null,
+    },
     { signal, onEvent, headers: getAuthHeaders() },
   );
+}
+
+/**
+ * 聊天历史列表
+ */
+export async function fetchConversations(limit = 50) {
+  const { data } = await client.get('/conversations', { params: { limit } });
+  return (data.conversations || []).map((item) => ({
+    conversationId: item.conversation_id,
+    title: item.title,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+    messageCount: item.message_count || 0,
+  }));
+}
+
+/**
+ * 新建空对话
+ */
+export async function createConversationAPI() {
+  const { data } = await client.post('/conversations');
+  return {
+    conversationId: data.conversation_id,
+    title: data.title,
+    createdAt: data.created_at,
+    updatedAt: data.updated_at,
+    messageCount: data.message_count || 0,
+  };
+}
+
+/**
+ * 加载完整对话（含 messages）
+ */
+export async function fetchConversation(conversationId) {
+  const { data } = await client.get(`/conversations/${conversationId}`);
+  return {
+    conversationId: data.conversation_id,
+    title: data.title,
+    createdAt: data.created_at,
+    updatedAt: data.updated_at,
+    messageCount: data.message_count || 0,
+    messages: (data.messages || []).map((m) => ({
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      createdAt: m.created_at,
+      meta: m.meta || {},
+    })),
+  };
+}
+
+/**
+ * 删除对话
+ */
+export async function deleteConversationAPI(conversationId) {
+  const { data } = await client.delete(`/conversations/${conversationId}`);
+  return data;
 }
 
 /**
@@ -261,17 +336,51 @@ export async function uploadDocument(file, onProgress) {
   const formData = new FormData();
   formData.append('file', file);
 
-  const { data } = await client.post('/documents/upload', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-      ...getAuthHeaders(),
-    },
-    timeout: 120000,
-    onUploadProgress: (event) => {
-      if (event.total && onProgress) {
+  // 使用 XHR 而非 axios：避免默认 Content-Type: application/json 破坏 multipart boundary
+  const token = getAuthToken();
+
+  const data = await new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE_URL}/documents/upload`);
+    if (token) {
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    }
+    xhr.timeout = 180000;
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && onProgress) {
         onProgress(Math.round((event.loaded * 100) / event.total));
       }
-    },
+    };
+
+    xhr.onload = () => {
+      let body = null;
+      try {
+        body = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+      } catch {
+        body = { detail: xhr.responseText || `上传失败 (${xhr.status})` };
+      }
+
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(body);
+        return;
+      }
+
+      const detail = body?.detail || `上传失败 (${xhr.status})`;
+      const error = new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+      error.response = { status: xhr.status, data: body };
+      reject(error);
+    };
+
+    xhr.onerror = () => {
+      reject(new Error('无法连接服务器，请确认后端是否已启动。'));
+    };
+
+    xhr.ontimeout = () => {
+      reject(new Error('上传超时，请稍后重试或换更小的文件。'));
+    };
+
+    xhr.send(formData);
   });
 
   return {
@@ -297,6 +406,18 @@ export async function fetchDocuments() {
     size: doc.size,
     uploadedAt: doc.uploaded_at,
   }));
+}
+
+/**
+ * 删除知识库中的文档（文件 + 向量）。
+ * @param {string} filename
+ */
+export async function deleteDocument(filename) {
+  const { data } = await client.post('/documents/delete', null, {
+    params: { filename },
+    headers: getAuthHeaders(),
+  });
+  return data;
 }
 
 export { API_BASE_URL };

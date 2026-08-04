@@ -15,6 +15,8 @@ class Settings(BaseSettings):
 
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
+    # 图片解析用视觉模型；为空则回退 openai_model。智谱示例: glm-4v-flash
+    openai_vision_model: str = ""
     openai_base_url: str | None = None
 
     app_name: str = "AI Agent Chat API"
@@ -81,6 +83,7 @@ class Settings(BaseSettings):
     # 持久化路径
     users_db_path: str = "data/users.db"
     sessions_db_path: str = "data/sessions.db"
+    conversations_db_path: str = "data/conversations.db"
     eval_db_path: str = "data/evaluations.db"
 
 

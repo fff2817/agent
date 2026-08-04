@@ -16,6 +16,7 @@ from eval.types import AnswerEvaluation, CitationEvaluation, EvaluationRecord, R
 def client(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("AUTH_DISABLED", "true")
     monkeypatch.setenv("SESSIONS_DB_PATH", str(tmp_path / "sessions.db"))
+    monkeypatch.setenv("CONVERSATIONS_DB_PATH", str(tmp_path / "conversations.db"))
     monkeypatch.setenv("EVAL_DB_PATH", str(tmp_path / "evaluations.db"))
     monkeypatch.setenv("RAG_STORE_PATH", str(tmp_path / "rag"))
     monkeypatch.setenv("MEMORY_STORE_PATH", str(tmp_path / "memory"))
@@ -24,9 +25,16 @@ def client(tmp_path: Path, monkeypatch):
 
     get_settings.cache_clear()
 
+    from conversation.store import reset_conversation_store
+
+    reset_conversation_store()
+
     from main import app
 
     yield TestClient(app)
+
+    reset_conversation_store()
+    get_settings.cache_clear()
 
     get_settings.cache_clear()
 

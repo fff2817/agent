@@ -174,11 +174,23 @@ class DocumentCatalog:
 
     def get_by_filename(self, filename: str) -> DocumentRecord | None:
         key = filename.strip().lower()
-        for record in self.list_ready():
+        for record in self._records.values():
             if record.filename.lower() == key:
                 return record
         return None
 
+    def remove(self, doc_id: str) -> DocumentRecord | None:
+        record = self._records.pop(doc_id, None)
+        if record is not None:
+            self.save()
+            logger.info("[Catalog] 已删除文档记录 doc_id=%s file=%s", doc_id, record.filename)
+        return record
+
+    def remove_by_filename(self, filename: str) -> DocumentRecord | None:
+        record = self.get_by_filename(filename)
+        if record is None:
+            return None
+        return self.remove(record.doc_id)
 
 _catalogs: dict[str, DocumentCatalog] = {}
 

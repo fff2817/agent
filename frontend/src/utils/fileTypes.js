@@ -1,10 +1,23 @@
-/** 支持的文档扩展名 */
-export const SUPPORTED_EXTENSIONS = ['.pdf', '.docx', '.txt', '.md', '.markdown']
+/** 支持的文档 / 图片扩展名 */
+export const SUPPORTED_EXTENSIONS = [
+  '.pdf',
+  '.docx',
+  '.txt',
+  '.md',
+  '.markdown',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.gif',
+]
 
 export const ACCEPT_ATTR =
-  '.pdf,.docx,.txt,.md,.markdown,application/pdf,' +
+  '.pdf,.docx,.txt,.md,.markdown,.png,.jpg,.jpeg,.webp,.gif,' +
+  'application/pdf,' +
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document,' +
-  'text/plain,text/markdown'
+  'text/plain,text/markdown,' +
+  'image/png,image/jpeg,image/webp,image/gif'
 
 const EXT_ICON = {
   pdf: '📄',
@@ -12,6 +25,12 @@ const EXT_ICON = {
   txt: '📃',
   markdown: '📃',
   md: '📃',
+  image: '🖼️',
+  png: '🖼️',
+  jpg: '🖼️',
+  jpeg: '🖼️',
+  webp: '🖼️',
+  gif: '🖼️',
 }
 
 /** 根据文件名或 file_type 返回 emoji 图标 */
@@ -24,6 +43,7 @@ export function getFileIcon(filenameOrType) {
   if (ext === '.docx') return '📝'
   if (ext === '.txt') return '📃'
   if (ext === '.md' || ext === '.markdown') return '📃'
+  if (['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(ext)) return '🖼️'
   return '📎'
 }
 
@@ -36,8 +56,20 @@ export function getFileTypeLabel(filename) {
     '.txt': 'TXT',
     '.md': 'MD',
     '.markdown': 'MD',
+    '.png': 'PNG',
+    '.jpg': 'JPG',
+    '.jpeg': 'JPEG',
+    '.webp': 'WEBP',
+    '.gif': 'GIF',
   }
   return map[ext] || ext.replace('.', '').toUpperCase()
+}
+
+/** 是否为图片文件 */
+export function isImageFile(fileOrName) {
+  const name = typeof fileOrName === 'string' ? fileOrName : fileOrName?.name || ''
+  const lower = name.toLowerCase()
+  return ['.png', '.jpg', '.jpeg', '.webp', '.gif'].some((ext) => lower.endsWith(ext))
 }
 
 /** 校验文件扩展名是否支持 */

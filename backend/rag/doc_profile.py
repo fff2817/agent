@@ -61,6 +61,11 @@ def infer_file_type(suffix: str) -> str:
         ".txt": "txt",
         ".md": "markdown",
         ".markdown": "markdown",
+        ".png": "image",
+        ".jpg": "image",
+        ".jpeg": "image",
+        ".webp": "image",
+        ".gif": "image",
     }
     return mapping.get(suffix.lower(), "other")
 

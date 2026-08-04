@@ -304,6 +304,60 @@ class FaissVectorStore:
         for idx in indices:
             self._metadata[idx]["doc_id"] = doc_id
 
+    def clear(self) -> None:
+        """清空内存索引并删除磁盘文件。"""
+        self._index = None
+        self._metadata = []
+        self._dimensions = 0
+        if self.index_path.exists():
+            self.index_path.unlink()
+        if self.metadata_path.exists():
+            self.metadata_path.unlink()
+        logger.info("[FAISS] 索引已清空")
+
+    def remove_by_doc_id_or_source(
+        self,
+        *,
+        doc_id: str | None = None,
+        source: str | None = None,
+    ) -> int:
+        """
+        按 doc_id 和/或 source 文件名删除 chunk，并重建 FAISS 索引。
+
+        IndexFlatIP 不支持原地删除，因此 reconstruct 保留向量后重建。
+        """
+        if self._index is None or self.count == 0:
+            return 0
+
+        source_key = (source or "").strip().lower()
+
+        def should_remove(meta: dict) -> bool:
+            if doc_id and meta.get("doc_id") == doc_id:
+                return True
+            if source_key and str(meta.get("source", "")).strip().lower() == source_key:
+                return True
+            return False
+
+        keep_indices = [i for i, meta in enumerate(self._metadata) if not should_remove(meta)]
+        removed = len(self._metadata) - len(keep_indices)
+        if removed == 0:
+            return 0
+
+        if not keep_indices:
+            self.clear()
+            return removed
+
+        vectors = np.vstack(
+            [self._index.reconstruct(int(i)) for i in keep_indices]
+        ).astype(np.float32)
+        new_index = faiss.IndexFlatIP(self._dimensions)
+        new_index.add(vectors)
+        self._index = new_index
+        self._metadata = [self._metadata[i] for i in keep_indices]
+        self.save()
+        logger.info("[FAISS] 已删除 %d 条 chunk, 剩余 %d", removed, self.count)
+        return removed
+
 
 _stores: dict[str, FaissVectorStore] = {}
 
