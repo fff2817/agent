@@ -13,7 +13,7 @@
     .venv\\Scripts\\python.exe -m rag.demo_rag --ask "报销需要哪些材料？"
 
 完整数据流:
-    用户问题 → Embedding → FAISS Search → Top-K Chunk
+    用户问题 → Embedding → Chroma Search → Top-K Chunk
              → Prompt 拼接 → LLM 回答
 """
 
@@ -21,7 +21,6 @@ import argparse
 import logging
 import sys
 
-import faiss
 import numpy as np
 
 from lc.rag.chain import rag_ask
@@ -62,13 +61,15 @@ def _banner(title: str) -> None:
 def _mock_embedded(chunks: list[TextChunk], dim: int = 128) -> list[EmbeddedChunk]:
     results: list[EmbeddedChunk] = []
     for chunk in chunks:
-        rng = np.random.default_rng(seed=chunk.chunk_id + 42)
-        vec = rng.standard_normal(dim).astype(np.float32).reshape(1, -1)
-        faiss.normalize_L2(vec)
+        rng = np.random.default_rng(seed=int(chunk.chunk_id) + 42)
+        vec = rng.standard_normal(dim).astype(np.float32)
+        norm = float(np.linalg.norm(vec))
+        if norm >= 1e-12:
+            vec = vec / norm
         results.append(
             EmbeddedChunk(
                 chunk=chunk,
-                embedding=vec[0].tolist(),
+                embedding=vec.astype(np.float32).tolist(),
                 model="mock",
                 dimensions=dim,
             )
@@ -79,7 +80,7 @@ def _mock_embedded(chunks: list[TextChunk], dim: int = 128) -> list[EmbeddedChun
 def run_ingest(store_dir: str, use_mock: bool) -> FaissVectorStore:
     _banner("阶段 0 — 文档入库（离线准备）")
     print("""
-  作用: 把文档切成 chunk → 向量化 → 存入 FAISS
+  作用: 把文档切成 chunk → 向量化 → 存入 Chroma
   这是一次性/定期更新的步骤，不是每次问答都做
 """)
 
@@ -87,6 +88,7 @@ def run_ingest(store_dir: str, use_mock: bool) -> FaissVectorStore:
     print(f"  切分得到 {len(chunks)} 个 chunk\n")
 
     store = FaissVectorStore(store_dir=store_dir)
+    store.clear()
 
     if use_mock:
         print("  使用 mock 向量入库（跳过 Embedding API）\n")
@@ -108,7 +110,7 @@ def run_ask(question: str, store_dir: str) -> None:
   ┌─────────────────────────────────────────────────────────┐
   │  Step 1  用户问题     接收用户自然语言提问                  │
   │  Step 2  Embedding    把问题变成向量（语义坐标）            │
-  │  Step 3  FAISS Search 在向量库中找最相似的 Top-K chunk     │
+  │  Step 3  Chroma Search 在向量库中找最相似的 Top-K chunk    │
   │  Step 4  Top-K Chunk  取出对应的文档原文 + 页码 + 分数      │
   │  Step 5  Prompt 拼接   资料 + 问题 → LLM messages          │
   │  Step 6  LLM 回答      基于资料生成回答（不编造）             │
@@ -139,7 +141,7 @@ def main() -> None:
     parser.add_argument("--mock", action="store_true", help="入库时使用 mock 向量")
     parser.add_argument("--ingest", action="store_true", help="仅执行入库")
     parser.add_argument("--ask", type=str, default=None, help="指定问题（默认: 报销需要哪些材料？）")
-    parser.add_argument("--store", default=DEFAULT_STORE, help="FAISS 存储目录")
+    parser.add_argument("--store", default=DEFAULT_STORE, help="Chroma 存储目录")
     args = parser.parse_args()
 
     question = args.ask or DEFAULT_QUESTION

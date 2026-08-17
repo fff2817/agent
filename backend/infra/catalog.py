@@ -1,7 +1,7 @@
 """
 文档目录（Catalog）— 知识库路由用的文档级 metadata。
 
-每个用户一份 catalog.json，与 FAISS chunk metadata 通过 doc_id 关联。
+每个用户一份 catalog.json，与向量库 chunk metadata 通过 doc_id 关联。
 """
 
 from __future__ import annotations
@@ -203,7 +203,7 @@ def get_document_catalog(user_id: str) -> DocumentCatalog:
 
 def sync_catalog_from_store(user_id: str) -> int:
     """
-    从已有 FAISS chunk metadata 重建 catalog，并为旧 chunk 补 doc_id。
+    从已有向量库 chunk metadata 重建 catalog，并为旧 chunk 补 doc_id。
 
     兼容路由功能上线前已入库的文档。
     """
@@ -280,7 +280,7 @@ def sync_catalog_from_store(user_id: str) -> int:
     if created:
         store.save()
         catalog.save()
-        logger.info("[Catalog] 从 FAISS 同步 %d 条文档记录 user=%s", created, user_id)
+        logger.info("[Catalog] 从向量库同步 %d 条文档记录 user=%s", created, user_id)
     return created
 
 

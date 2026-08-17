@@ -1,31 +1,47 @@
 """
-Long-term Memory FAISS 向量库 — 与 RAG 索引物理分离。
+Long-term Memory 向量库 — 基于 LangChain Chroma，与 RAG 索引物理分离。
 
-为什么单独建索引?
-    · RAG 存 PDF chunk，全局共享，metadata 含 page/source
-    · Long-term 存用户记忆，按 user_id 隔离，metadata 含 memory_type
-    · 混用一个 index 会导致检索污染、权限混乱
+为什么单独建集合?
+    · RAG 存文档 chunk，metadata 含 page/source
+    · Long-term 存用户记忆，按 user_id 隔离目录，metadata 含 memory_type
+    · 混用会导致检索污染、权限混乱
 
-复用 rag/vectorstore.py 的设计:
-    faiss.index 存向量，metadata.json 存原文与业务字段。
+对外 API 与旧 FAISS MemoryVectorStore 对齐，上层 memory 链无需改接口。
 """
 
 from __future__ import annotations
 
-import json
 import logging
+import uuid
 from pathlib import Path
 
-import faiss
 import numpy as np
+from langchain_chroma import Chroma
 
 from core.config import get_settings
 from lc.memory.types import MemoryRecord, MemoryType
 
 logger = logging.getLogger(__name__)
 
-INDEX_FILENAME = "faiss.index"
-METADATA_FILENAME = "metadata.json"
+COLLECTION_NAME = "memories"
+
+
+def _l2_normalize(vectors: np.ndarray) -> np.ndarray:
+    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+    norms = np.maximum(norms, 1e-12)
+    return (vectors / norms).astype(np.float32)
+
+
+def _chroma_meta(meta: dict) -> dict:
+    out: dict = {}
+    for key, value in meta.items():
+        if value is None:
+            continue
+        if isinstance(value, (str, int, float, bool)):
+            out[key] = value
+        else:
+            out[key] = str(value)
+    return out
 
 
 class MemorySearchResult:
@@ -42,15 +58,15 @@ class MemorySearchResult:
     ) -> None:
         self.rank = rank
         self.score = score
-        self.faiss_id = faiss_id
+        self.faiss_id = faiss_id  # 字段名保持 API 兼容（内部为 seq_id）
         self.record = record
 
 
 class MemoryVectorStore:
     """
-    长期记忆专用 FAISS 封装。
+    长期记忆专用 Chroma 封装（LangChain 集成）。
 
-    metadata 与 FAISS 内部 ID（0, 1, 2, ...）一一对应。
+    每用户独立 persist_directory，metadata 含业务字段。
     """
 
     def __init__(self, store_dir: str | Path | None = None) -> None:
@@ -58,23 +74,40 @@ class MemoryVectorStore:
         self.store_dir = Path(store_dir or settings.memory_store_path)
         self.store_dir.mkdir(parents=True, exist_ok=True)
 
-        self.index_path = self.store_dir / INDEX_FILENAME
-        self.metadata_path = self.store_dir / METADATA_FILENAME
+        self.index_path = self.store_dir / "chroma.sqlite3"
+        self.metadata_path = self.store_dir / "chroma.sqlite3"
 
-        self._index: faiss.Index | None = None
-        self._metadata: list[dict] = []
         self._dimensions: int = 0
+        self._vs = Chroma(
+            collection_name=COLLECTION_NAME,
+            persist_directory=str(self.store_dir),
+            embedding_function=None,
+            collection_metadata={"hnsw:space": "cosine"},
+        )
 
-        logger.info("[MemoryFAISS] 初始化, 目录=%s", self.store_dir)
+        if self.count > 0:
+            sample = self._vs.get(limit=1, include=["embeddings", "metadatas"])
+            embeddings = sample.get("embeddings")
+            if embeddings is not None and len(embeddings) > 0 and embeddings[0] is not None:
+                self._dimensions = len(embeddings[0])
+            else:
+                metas = sample.get("metadatas") or []
+                if metas and metas[0] and "dimensions" in metas[0]:
+                    self._dimensions = int(metas[0]["dimensions"])
 
-        if self.index_path.exists() and self.metadata_path.exists():
-            self.load()
+        logger.info(
+            "[ChromaMemory] 初始化, 目录=%s, 条数=%d",
+            self.store_dir,
+            self.count,
+        )
+
+    @property
+    def _collection(self):
+        return self._vs._collection
 
     @property
     def count(self) -> int:
-        if self._index is None:
-            return 0
-        return self._index.ntotal
+        return int(self._collection.count())
 
     def count_for_user(self, user_id: str) -> int:
         """该用户在索引中的记忆条数（每用户独立索引时等于 count）。"""
@@ -82,7 +115,13 @@ class MemoryVectorStore:
 
     def list_for_user(self, user_id: str) -> list[MemoryRecord]:
         """列出该用户的全部长期记忆（按 created_at 降序）。"""
-        records = [_meta_to_record(meta) for meta in self._metadata]
+        if self.count == 0:
+            return []
+        data = self._vs.get(include=["metadatas"])
+        records = [
+            _meta_to_record(meta or {})
+            for meta in (data.get("metadatas") or [])
+        ]
         records.sort(key=lambda r: r.created_at, reverse=True)
         return records
 
@@ -94,91 +133,71 @@ class MemoryVectorStore:
         model: str,
     ) -> int:
         """
-        追加一条记忆向量。
+        追加一条记忆向量（增量写入，自动持久化）。
 
         返回:
-            FAISS 内部 ID
+            内部 seq_id（兼容旧 FAISS ID 语义）
         """
         if not embedding:
             raise ValueError("embedding 不能为空")
 
         dim = len(embedding)
-        vector = np.array([embedding], dtype=np.float32)
-        faiss.normalize_L2(vector)
-
-        if self._index is None:
-            self._index = faiss.IndexFlatIP(dim)
-            self._dimensions = dim
-            logger.info("[MemoryFAISS] 创建新索引, 维度=%d", dim)
-        elif self._dimensions != dim:
+        if self._dimensions and self._dimensions != dim:
             raise ValueError(
                 f"索引维度 {self._dimensions} 与向量维度 {dim} 不匹配"
             )
 
-        faiss_id = self.count
-        self._index.add(vector)
-        self._metadata.append(
+        vector = _l2_normalize(np.array([embedding], dtype=np.float32))[0].tolist()
+        seq_id = self.count
+        chroma_id = f"mem-{record.memory_id}-{uuid.uuid4().hex[:8]}"
+
+        meta = _chroma_meta(
             {
+                "seq_id": seq_id,
                 "memory_id": record.memory_id,
                 "user_id": record.user_id,
                 "content": record.content,
                 "memory_type": record.memory_type.value,
-                "importance": record.importance,
-                "source_session_id": record.source_session_id,
-                "raw_user": record.raw_user,
-                "created_at": record.created_at,
+                "importance": float(record.importance),
+                "source_session_id": record.source_session_id or "",
+                "raw_user": record.raw_user or "",
+                "created_at": record.created_at or "",
                 "embedding_model": model,
+                "dimensions": dim,
             }
         )
 
+        self._collection.add(
+            ids=[chroma_id],
+            embeddings=[vector],
+            documents=[record.content],
+            metadatas=[meta],
+        )
+        self._dimensions = dim
+
         logger.info(
-            "[MemoryFAISS] 写入 memory_id=%s user=%s type=%s",
+            "[ChromaMemory] 写入 memory_id=%s user=%s type=%s",
             record.memory_id,
             record.user_id,
             record.memory_type.value,
         )
-        return faiss_id
+        return seq_id
 
     def save(self) -> None:
-        if self._index is None or self.count == 0:
-            logger.warning("[MemoryFAISS] save: 索引为空，跳过")
+        """Chroma 自动持久化；保留方法以兼容调用方。"""
+        if self.count == 0:
+            logger.warning("[ChromaMemory] save: 集合为空，跳过")
             return
-
-        faiss.write_index(self._index, str(self.index_path))
-        payload = {
-            "version": 1,
-            "dimensions": self._dimensions,
-            "total": self.count,
-            "memories": self._metadata,
-        }
-        self.metadata_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        logger.info("[MemoryFAISS] save 完成, 共 %d 条", self.count)
+        logger.info("[ChromaMemory] save 完成, 共 %d 条", self.count)
 
     def load(self) -> None:
-        if not self.index_path.exists():
-            raise FileNotFoundError(f"索引文件不存在: {self.index_path}")
-        if not self.metadata_path.exists():
-            raise FileNotFoundError(f"metadata 不存在: {self.metadata_path}")
-
-        self._index = faiss.read_index(str(self.index_path))
-        self._dimensions = self._index.d
-
-        raw = json.loads(self.metadata_path.read_text(encoding="utf-8"))
-        self._metadata = raw.get("memories", [])
-
-        if self._index.ntotal != len(self._metadata):
-            raise ValueError(
-                f"向量数 ({self._index.ntotal}) 与 metadata ({len(self._metadata)}) 不一致"
-            )
-
-        logger.info(
-            "[MemoryFAISS] load 完成, 维度=%d, 条数=%d",
-            self._dimensions,
-            self.count,
+        self._vs = Chroma(
+            collection_name=COLLECTION_NAME,
+            persist_directory=str(self.store_dir),
+            embedding_function=None,
+            collection_metadata={"hnsw:space": "cosine"},
         )
+        logger.info("[ChromaMemory] load 完成, 条数=%d", self.count)
 
     def search(
         self,
@@ -190,39 +209,45 @@ class MemoryVectorStore:
         """
         语义检索记忆。
 
-        每用户独立索引，无需 post-filter。
+        每用户独立目录，无需 post-filter。
         """
-        if self._index is None or self.count == 0:
+        if self.count == 0:
             return []
 
         settings = get_settings()
         k = top_k or settings.memory_top_k
 
-        if len(query_embedding) != self._dimensions:
+        if self._dimensions and len(query_embedding) != self._dimensions:
             raise ValueError(
                 f"query 维度 {len(query_embedding)} != 索引维度 {self._dimensions}"
             )
 
         fetch_k = min(self.count, k)
+        query_vec = _l2_normalize(
+            np.array([query_embedding], dtype=np.float32)
+        )[0].tolist()
 
-        query_vec = np.array([query_embedding], dtype=np.float32)
-        faiss.normalize_L2(query_vec)
+        raw = self._collection.query(
+            query_embeddings=[query_vec],
+            n_results=fetch_k,
+            include=["distances", "metadatas"],
+        )
 
-        scores, indices = self._index.search(query_vec, fetch_k)
+        ids = (raw.get("ids") or [[]])[0]
+        distances = (raw.get("distances") or [[]])[0]
+        metadatas = (raw.get("metadatas") or [[]])[0]
 
         results: list[MemorySearchResult] = []
-        for idx, score in zip(indices[0], scores[0]):
-            if idx < 0:
-                continue
-
-            meta = self._metadata[int(idx)]
+        for _cid, distance, meta in zip(ids, distances, metadatas):
+            meta = meta or {}
             record = _meta_to_record(meta)
-            weighted_score = float(score) * record.importance
+            cosine_sim = 1.0 - float(distance)
+            weighted_score = cosine_sim * record.importance
             results.append(
                 MemorySearchResult(
                     rank=0,
                     score=weighted_score,
-                    faiss_id=int(idx),
+                    faiss_id=int(meta.get("seq_id", 0)),
                     record=record,
                 )
             )
@@ -238,7 +263,7 @@ _stores: dict[str, MemoryVectorStore] = {}
 
 
 def get_memory_vector_store(user_id: str) -> MemoryVectorStore:
-    """按 user_id 获取长期记忆 FAISS 实例（每用户独立目录）。"""
+    """按 user_id 获取长期记忆 Chroma 实例（每用户独立目录）。"""
     if user_id not in _stores:
         settings = get_settings()
         store_dir = Path(settings.memory_store_path) / user_id
@@ -246,14 +271,19 @@ def get_memory_vector_store(user_id: str) -> MemoryVectorStore:
     return _stores[user_id]
 
 
+def clear_memory_store_cache() -> None:
+    """测试用：清空进程内 store 缓存。"""
+    _stores.clear()
+
+
 def _meta_to_record(meta: dict) -> MemoryRecord:
     return MemoryRecord(
         memory_id=meta["memory_id"],
         user_id=meta["user_id"],
-        content=meta["content"],
+        content=meta.get("content", ""),
         memory_type=MemoryType(meta["memory_type"]),
         importance=float(meta.get("importance", 0.7)),
-        source_session_id=meta.get("source_session_id"),
+        source_session_id=meta.get("source_session_id") or None,
         raw_user=meta.get("raw_user", ""),
         created_at=meta.get("created_at", ""),
     )

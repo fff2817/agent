@@ -88,12 +88,12 @@ class EmbeddedChunk:
 @dataclass
 class SearchResult:
     """
-    FAISS 检索结果 — Top-K 中的单条。
+    向量检索结果 — Top-K 中的单条。
 
     属性:
         rank:     排名，1 表示最相似
-        score:    相似度分数（内积，归一化后 ≈ 余弦相似度，越高越像）
-        faiss_id: 在 FAISS 索引中的内部 ID
+        score:    相似度分数（余弦相似度，越高越像）
+        faiss_id: 内部序号 ID（字段名保留以兼容 API / Eval）
         chunk:    对应的文本块（原文 + 来源 + 页码）
     """
 

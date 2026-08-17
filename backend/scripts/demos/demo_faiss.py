@@ -1,31 +1,32 @@
 """
-FAISS 向量索引 — 可运行演示。
+Chroma 向量索引 — 可运行演示（LangChain Chroma）。
 
 用法（backend 目录）:
-    # 使用 mock 向量（无需 API Key，验证 FAISS 逻辑）
-    .venv\\Scripts\\python.exe -m rag.demo_faiss --mock
+    # 使用 mock 向量（无需 API Key，验证 Chroma 存取）
+    .venv\\Scripts\\python.exe -m scripts.demos.demo_faiss --mock
 
     # 使用真实 Embedding API
-    .venv\\Scripts\\python.exe -m rag.demo_faiss
+    .venv\\Scripts\\python.exe -m scripts.demos.demo_faiss
 
-FAISS 工作原理（本 demo 会逐步打印）:
+流程:
     1. 每个 chunk 变成高维向量（Embedding）
-    2. 向量存入 FAISS 索引（坐标系里的点）
+    2. 向量写入 Chroma（persist_directory 持久化）
     3. 用户问题也变成向量
-    4. FAISS 计算 query 与所有点的相似度，返回 Top-K 最近的
+    4. 余弦相似度检索 Top-K，带回原文 metadata
 """
+
+from __future__ import annotations
 
 import argparse
 import logging
 import sys
 
-import faiss
 import numpy as np
 
-from lc.rag.chunker import chunk_plain_text
-from lc.llm.embeddings import embed_chunks
-from lc.rag.types import EmbeddedChunk, TextChunk
 from infra.rag_vectorstore import FaissVectorStore
+from lc.llm.embeddings import embed_chunks
+from lc.rag.chunker import chunk_plain_text
+from lc.rag.types import EmbeddedChunk, TextChunk
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
@@ -52,21 +53,23 @@ def _banner(title: str) -> None:
     print("=" * 62)
 
 
+def _l2_normalize(vec: np.ndarray) -> np.ndarray:
+    norm = float(np.linalg.norm(vec))
+    if norm < 1e-12:
+        return vec.astype(np.float32)
+    return (vec / norm).astype(np.float32)
+
+
 def _make_mock_embedded(chunks: list[TextChunk], dim: int = 128) -> list[EmbeddedChunk]:
-    """
-    用固定随机种子生成 mock 向量（无需 API）。
-    注意: mock 向量没有真实语义，仅用于验证 FAISS 存取与搜索流程。
-    """
+    """用固定随机种子生成 mock 向量（无需 API）。"""
     results: list[EmbeddedChunk] = []
-    for i, chunk in enumerate(chunks):
-        rng = np.random.default_rng(seed=chunk.chunk_id + 42)
-        vec = rng.standard_normal(dim).astype(np.float32)
-        vec_2d = vec.reshape(1, -1)
-        faiss.normalize_L2(vec_2d)
+    for chunk in chunks:
+        rng = np.random.default_rng(seed=int(chunk.chunk_id) + 42)
+        vec = _l2_normalize(rng.standard_normal(dim).astype(np.float32))
         results.append(
             EmbeddedChunk(
                 chunk=chunk,
-                embedding=vec_2d[0].tolist(),
+                embedding=vec.tolist(),
                 model="mock",
                 dimensions=dim,
             )
@@ -75,7 +78,7 @@ def _make_mock_embedded(chunks: list[TextChunk], dim: int = 128) -> list[Embedde
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="FAISS 向量索引 Demo")
+    parser = argparse.ArgumentParser(description="Chroma 向量索引 Demo")
     parser.add_argument(
         "--mock",
         action="store_true",
@@ -88,27 +91,21 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    _banner("FAISS 工作原理（简要）")
+    _banner("Chroma 工作原理（简要）")
     print("""
-  1. Embedding:  文本 → 高维向量（一排 float）
-  2. FAISS 存储:  所有 chunk 向量放进「索引」（类似搜索引擎的倒排表）
+  1. Embedding:  文本 → 高维向量
+  2. Chroma 存储: chunk 向量 + metadata 同库，落盘到 persist_directory
   3. 用户提问:    问题也变成 query 向量
-  4. Similarity Search: FAISS 在索引里找与 query 最相似的 Top-K 个向量
-  5. 映射回原文:  FAISS 只返回「第几个向量 + 分数」，metadata.json 存原文
-
-  本 demo 使用 IndexFlatIP:
-    · 精确搜索（暴力比对每一条，适合 demo 和小规模数据）
-    · IP = Inner Product 内积；向量 L2 归一化后，内积 = 余弦相似度
+  4. Similarity Search: 余弦空间 Top-K（score = 1 - distance）
+  5. 映射回原文:  metadata / documents 直接带回文本、页码、来源
 """)
 
-    # --- Step A: 切分文档 ---
     _banner("Step A — 文档切分")
     chunks = chunk_plain_text(SAMPLE_DOC, source="员工手册.txt", chunk_size=120, chunk_overlap=20)
     print(f"  共 {len(chunks)} 个 chunk\n")
     for c in chunks:
         print(f"    Chunk #{c.chunk_id}: {c.text[:60].replace(chr(10), ' ')}...")
 
-    # --- Step B: Embedding ---
     _banner("Step B — 生成 Embedding")
     if args.mock:
         print("  模式: mock（随机向量，无需 API）\n")
@@ -124,30 +121,23 @@ def main() -> None:
 
     print(f"  已向量化 {len(embedded)} 条, 维度={embedded[0].dimensions}")
 
-    # --- Step C: 写入 FAISS ---
-    _banner("Step C — 写入 FAISS 并保存")
+    _banner("Step C — 写入 Chroma 并保存")
     store = FaissVectorStore(store_dir=args.store)
+    store.clear()
     store.add_embeddings(embedded)
     store.save()
-    print(f"\n  索引路径: {args.store}/faiss.index")
-    print(f"  元数据:   {args.store}/metadata.json")
+    print(f"\n  持久化目录: {args.store}/chroma.sqlite3")
 
-    # --- Step D: 重新加载（模拟重启后检索）---
-    _banner("Step D — 从磁盘 load 索引")
+    _banner("Step D — 从磁盘重新打开")
     store2 = FaissVectorStore(store_dir=args.store)
     print(f"  已加载 {store2.count} 条向量")
 
-    # --- Step E: Similarity Search ---
     _banner("Step E — Similarity Search (Top-3)")
-
     if args.mock:
-        # mock 模式下用第一个 chunk 的向量模拟「相关问题」
-        query_vector = embedded[2].embedding
-        query_text = "（mock: 使用 chunk#2 的向量作为 query）"
-        print(f"  Query: {query_text}\n")
+        query_vector = embedded[min(2, len(embedded) - 1)].embedding
+        print("  Query: （mock: 使用某一 chunk 向量作为 query）\n")
         results = store2.search(query_vector, top_k=3)
     else:
-        from lc.llm.embeddings import embed_text
         from lc.rag.retriever import search_similar
 
         query_text = "报销需要哪些材料？"
@@ -156,12 +146,12 @@ def main() -> None:
 
     _banner("检索结果 Top-K")
     for r in results:
-        print(f"\n  Rank #{r.rank}  |  score={r.score:.4f}  |  faiss_id={r.faiss_id}")
+        print(f"\n  Rank #{r.rank}  |  score={r.score:.4f}  | id={r.faiss_id}")
         print(f"  来源: {r.chunk.source} 第{r.chunk.page}页")
         print(f"  文本: {r.chunk.text[:120]}{'...' if len(r.chunk.text) > 120 else ''}")
 
     _banner("完成")
-    print("  下一步: 封装为 tools/search_docs，接入 ReAct Agent\n")
+    print("  下一步: 封装为 tools/search_docs，接入 Agent\n")
 
 
 if __name__ == "__main__":

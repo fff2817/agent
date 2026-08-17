@@ -12,8 +12,8 @@ import pytest
 from auth.user_store import UserStore
 from infra.session_store import SessionForbiddenError, SessionStore
 from lc.memory.types import MemoryRecord, MemoryType
-from infra.memory_vectorstore import get_memory_vector_store
-from infra.rag_vectorstore import get_rag_vector_store
+from infra.memory_vectorstore import clear_memory_store_cache, get_memory_vector_store
+from infra.rag_vectorstore import clear_rag_store_cache, get_rag_vector_store
 
 
 @pytest.fixture
@@ -65,6 +65,7 @@ def test_memory_vector_store_per_user_isolation(temp_dirs, monkeypatch):
     from core.config import get_settings
 
     get_settings.cache_clear()
+    clear_memory_store_cache()
 
     user_a = "user-a"
     user_b = "user-b"
@@ -95,8 +96,8 @@ def test_memory_vector_store_per_user_isolation(temp_dirs, monkeypatch):
 
     assert store_a.count == 1
     assert store_b.count == 1
-    assert (temp_dirs["memory_root"] / user_a / "faiss.index").exists()
-    assert (temp_dirs["memory_root"] / user_b / "faiss.index").exists()
+    assert (temp_dirs["memory_root"] / user_a / "chroma.sqlite3").exists()
+    assert (temp_dirs["memory_root"] / user_b / "chroma.sqlite3").exists()
 
     hits_a = store_a.search(vec_a, top_k=1)
     hits_b = store_b.search(vec_b, top_k=1)
@@ -114,6 +115,7 @@ def test_rag_vector_store_per_user_isolation(temp_dirs, monkeypatch):
     from lc.rag.types import EmbeddedChunk, TextChunk
 
     get_settings.cache_clear()
+    clear_rag_store_cache()
 
     user_a = "user-a"
     user_b = "user-b"
@@ -152,9 +154,9 @@ def test_rag_vector_store_per_user_isolation(temp_dirs, monkeypatch):
     store_b.save()
 
     assert store_a.count == 1
-    assert store_b.count == 0 or store_b.count == 1
-    assert (temp_dirs["rag_root"] / user_a / "faiss.index").exists()
-    assert (temp_dirs["rag_root"] / user_b / "faiss.index").exists()
+    assert store_b.count == 1
+    assert (temp_dirs["rag_root"] / user_a / "chroma.sqlite3").exists()
+    assert (temp_dirs["rag_root"] / user_b / "chroma.sqlite3").exists()
 
     get_settings.cache_clear()
 

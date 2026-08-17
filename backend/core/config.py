@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     # Embedding 模型（OpenAI: text-embedding-3-small；智谱: embedding-3）
     embedding_model: str = "embedding-3"
 
-    # FAISS 向量库目录
+    # RAG Chroma 向量库目录（每用户子目录）
     rag_store_path: str = "rag/store"
 
     # 检索返回 Top-K 条
@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     rag_max_route_docs: int = 2
     # 摘要向量相似度低于此值时 fallback 全库
     rag_route_min_score: float = 0.35
-    # post-filter 时 FAISS 候选放大倍数
+    # post-filter 时向量检索候选放大倍数
     rag_route_expand_factor: int = 5
     # Top-2 分数接近时同时选中的差距阈值
     rag_route_score_delta: float = 0.05
@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     # trim_messages 近似 token 上限（摘要失败时的硬裁剪）
     session_compress_max_tokens: int = 4000
 
-    # Long-term Memory 向量库目录（与 rag/store 分离）
+    # Long-term Memory Chroma 目录（与 rag/store 分离）
     memory_store_path: str = "memory/store"
 
     # 长期记忆检索 Top-K
