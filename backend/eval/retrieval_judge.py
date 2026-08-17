@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from rag.types import SearchResult
+from lc.rag.types import SearchResult
 
 from eval.types import (
     RetrievalEvaluation,

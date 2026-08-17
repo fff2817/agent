@@ -26,13 +26,12 @@ from auth.dependencies import get_current_user
 
 from core.sse import create_sse_response
 
-from memory.chain import memory_ask, memory_ask_stream
+from lc.memory.chain import memory_ask, memory_ask_stream
+from lc.memory.conversation_memory import get_conversation_memory
+from infra.longterm_store import get_longterm_store
+from infra.session_store import SessionForbiddenError, get_session_store
 
-from memory.longterm_store import get_longterm_store
-
-from memory.session_store import SessionForbiddenError, get_session_store
-
-from memory.vectorstore import get_memory_vector_store
+from infra.memory_vectorstore import get_memory_vector_store
 
 from models.schemas import (
 
@@ -222,7 +221,7 @@ async def memory_ask_endpoint(
 
 
 
-    history = session_store.get_history_messages(session_id)
+    history = get_conversation_memory().load_history_for_prompt(session_id)
 
 
 
@@ -254,7 +253,7 @@ async def memory_ask_endpoint(
 
 
 
-    session_store.add_turn(session_id, request.question, result.answer)
+    get_conversation_memory().add_turn(session_id, request.question, result.answer)
 
     longterm.save_turn(
 
@@ -342,7 +341,7 @@ async def memory_ask_stream_endpoint(
 
     session_id, _ = _resolve_session(session_store, request.session_id, user.user_id)
 
-    history = session_store.get_history_messages(session_id)
+    history = get_conversation_memory().load_history_for_prompt(session_id)
 
     cancelled = {"value": False}
 
@@ -394,7 +393,7 @@ async def memory_ask_stream_endpoint(
 
             if event.get("type") == "done":
 
-                session_store.add_turn(session_id, request.question, event["answer"])
+                get_conversation_memory().add_turn(session_id, request.question, event["answer"])
 
                 longterm.save_turn(
 
@@ -420,7 +419,7 @@ async def memory_ask_stream_endpoint(
 
                 if answer.strip():
 
-                    session_store.add_turn(session_id, request.question, answer)
+                    get_conversation_memory().add_turn(session_id, request.question, answer)
 
                     longterm.save_turn(
 

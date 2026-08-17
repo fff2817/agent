@@ -16,15 +16,16 @@ from auth.dependencies import get_current_user
 from core.sse import create_sse_response
 from eval.pipeline import evaluate_rag_result, rag_result_from_source_dicts
 from eval.serializers import record_to_summary, sources_for_response
-from memory.session_store import SessionForbiddenError, get_session_store
+from lc.memory.conversation_memory import get_conversation_memory
+from infra.session_store import SessionForbiddenError, get_session_store
 from models.schemas import (
     RAGAskRequest,
     RAGAskResponse,
     RAGIngestRequest,
     RAGIngestResponse,
 )
-from rag.chain import rag_ask, rag_ask_stream
-from rag.ingest import ingest_text
+from lc.rag.chain import rag_ask, rag_ask_stream
+from lc.rag.ingest import ingest_text
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ async def rag_ask_endpoint(
 ) -> RAGAskResponse:
     """RAG 文档问答 — 完整链路 HTTP 入口。"""
     session_store = get_session_store()
+    conv_memory = get_conversation_memory()
     session_id, _ = _resolve_session(session_store, request.session_id, user.user_id)
 
     logger.info(
@@ -54,7 +56,7 @@ async def rag_ask_endpoint(
         request.question[:100],
     )
 
-    history = session_store.get_history_messages(session_id)
+    history = conv_memory.load_history_for_prompt(session_id)
 
     try:
         t0 = time.perf_counter()
@@ -72,7 +74,7 @@ async def rag_ask_endpoint(
         logger.exception("[API/RAG] RAG 执行失败")
         raise HTTPException(status_code=502, detail="RAG pipeline failed") from exc
 
-    session_store.add_turn(session_id, request.question, result.answer)
+    conv_memory.add_turn(session_id, request.question, result.answer)
 
     evaluation = None
     eval_record = None
@@ -105,8 +107,9 @@ async def rag_ask_stream_endpoint(
 ):
     """流式 RAG 文档问答（SSE）。事件: context → token* → done | cancelled | error"""
     session_store = get_session_store()
+    conv_memory = get_conversation_memory()
     session_id, _ = _resolve_session(session_store, request.session_id, user.user_id)
-    history = session_store.get_history_messages(session_id)
+    history = conv_memory.load_history_for_prompt(session_id)
     cancelled = {"value": False}
     partial_answer = {"value": ""}
 
@@ -138,7 +141,7 @@ async def rag_ask_stream_endpoint(
                 partial_answer["value"] += event.get("content", "")
 
             if event.get("type") == "done":
-                session_store.add_turn(session_id, request.question, event["answer"])
+                conv_memory.add_turn(session_id, request.question, event["answer"])
                 event["session_id"] = session_id
                 event["user_id"] = user.user_id
 
@@ -167,7 +170,7 @@ async def rag_ask_stream_endpoint(
             if event.get("type") == "cancelled":
                 answer = event.get("answer") or partial_answer["value"]
                 if answer.strip():
-                    session_store.add_turn(session_id, request.question, answer)
+                    conv_memory.add_turn(session_id, request.question, answer)
                 event["session_id"] = session_id
                 event["user_id"] = user.user_id
 

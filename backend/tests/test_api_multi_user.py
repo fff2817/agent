@@ -22,7 +22,7 @@ def client(tmp_path, monkeypatch):
     get_settings.cache_clear()
 
     # 清除单例缓存
-    import memory.session_store as ss
+    import infra.session_store as ss
     import auth.user_store as us
     from conversation.store import reset_conversation_store
 

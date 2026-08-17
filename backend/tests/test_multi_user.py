@@ -10,10 +10,10 @@ import numpy as np
 import pytest
 
 from auth.user_store import UserStore
-from memory.session_store import SessionForbiddenError, SessionStore
-from memory.types import MemoryRecord, MemoryType
-from memory.vectorstore import get_memory_vector_store
-from rag.vectorstore import get_rag_vector_store
+from infra.session_store import SessionForbiddenError, SessionStore
+from lc.memory.types import MemoryRecord, MemoryType
+from infra.memory_vectorstore import get_memory_vector_store
+from infra.rag_vectorstore import get_rag_vector_store
 
 
 @pytest.fixture
@@ -111,7 +111,7 @@ def test_rag_vector_store_per_user_isolation(temp_dirs, monkeypatch):
     monkeypatch.setenv("RAG_STORE_PATH", str(temp_dirs["rag_root"]))
 
     from core.config import get_settings
-    from rag.types import EmbeddedChunk, TextChunk
+    from lc.rag.types import EmbeddedChunk, TextChunk
 
     get_settings.cache_clear()
 

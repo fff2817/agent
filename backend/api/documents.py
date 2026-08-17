@@ -16,15 +16,15 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from auth.context import UserContext
 from auth.dependencies import get_current_user
 from core.config import get_settings
-from file_parser.parser import get_supported_extensions
+from infra.file_parser.parser import get_supported_extensions
 from models.schemas import (
     DocumentItemSchema,
     DocumentListResponse,
     DocumentUploadResponse,
 )
-from rag.catalog import get_document_catalog
-from rag.ingest import ingest_file
-from rag.vectorstore import get_rag_vector_store
+from infra.catalog import get_document_catalog
+from lc.rag.ingest import ingest_file
+from infra.rag_vectorstore import get_rag_vector_store
 
 logger = logging.getLogger(__name__)
 

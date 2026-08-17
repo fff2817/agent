@@ -1,61 +1,27 @@
-# 用法：将 demo.example.com 替换为你的域名，或改为 :80 做 HTTP Demo
-demo.example.com {
+# 本地 HTTP Demo（无域名）或替换为你的域名
+:80 {
 	encode gzip
 
-	# 前端静态文件
-	root * /srv/frontend
-	file_server
-	try_files {path} /index.html
-
-	# API + SSE
-	handle /health {
-		reverse_proxy backend:8000
-	}
-	handle /auth/* {
-		reverse_proxy backend:8000
-	}
-	handle /chat* {
-		reverse_proxy backend:8000 {
+	# 全部反代到 app（前后端同容器时最简单）
+	handle {
+		reverse_proxy app:8000 {
 			flush_interval -1
 			transport http {
 				read_timeout 3600s
 				write_timeout 3600s
 			}
 		}
-	}
-	handle /rag/* {
-		reverse_proxy backend:8000 {
-			flush_interval -1
-			transport http {
-				read_timeout 3600s
-				write_timeout 3600s
-			}
-		}
-	}
-	handle /memory* {
-		reverse_proxy backend:8000 {
-			flush_interval -1
-			transport http {
-				read_timeout 3600s
-				write_timeout 3600s
-			}
-		}
-	}
-	handle /documents* {
-		reverse_proxy backend:8000 {
-			transport http {
-				read_timeout 300s
-				write_timeout 300s
-			}
-		}
-	}
-	handle /docs* {
-		reverse_proxy backend:8000
-	}
-	handle /openapi.json {
-		reverse_proxy backend:8000
-	}
-	handle /redoc {
-		reverse_proxy backend:8000
 	}
 }
+
+# 生产示例（按域名拆分静态与 API 时可启用并注释上面的 :80）
+# demo.example.com {
+# 	encode gzip
+# 	reverse_proxy app:8000 {
+# 		flush_interval -1
+# 		transport http {
+# 			read_timeout 3600s
+# 			write_timeout 3600s
+# 		}
+# 	}
+# }

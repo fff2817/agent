@@ -8,10 +8,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from rag.catalog import DocumentCatalog, DocumentRecord
-from rag.router import route_documents
-from rag.types import EmbeddedChunk, TextChunk
-from rag.vectorstore import FaissVectorStore
+from infra.catalog import DocumentCatalog, DocumentRecord
+from lc.rag.router import route_documents
+from lc.rag.types import EmbeddedChunk, TextChunk
+from infra.rag_vectorstore import FaissVectorStore
 
 
 @pytest.fixture
@@ -90,7 +90,7 @@ def test_route_selects_faiss_notes(temp_rag_env, monkeypatch):
             return vec_req
         return [0.5, 0.5, 0.0]
 
-    monkeypatch.setattr("rag.router.embed_text", fake_embed)
+    monkeypatch.setattr("lc.rag.router.embed_text", fake_embed)
 
     result = route_documents("讲一下FAISS", user_id=user_id, catalog=catalog)
     assert record_notes.doc_id in result.selected_doc_ids

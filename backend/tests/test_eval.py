@@ -10,7 +10,7 @@ from eval.citation import evaluate_citations, extract_cited_ranks
 from eval.retrieval_judge import evaluate_retrieval
 from eval.store import EvalStore, reset_eval_store
 from eval.types import AnswerEvaluation, CitationEvaluation, EvaluationRecord, RetrievalEvaluation
-from rag.types import SearchResult, TextChunk
+from lc.rag.types import SearchResult, TextChunk
 
 
 def _chunk(text: str, *, rank: int = 1, score: float = 0.8) -> SearchResult:

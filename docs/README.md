@@ -6,15 +6,15 @@
 
 | 文档 | 对应代码目录 | 一句话说明 |
 |------|-------------|-----------|
-| [architecture.md](./architecture.md) | 全项目 | 整体架构、模块关系、两条主链路 |
+| [architecture.md](./architecture.md) | 全项目 | 整体架构、模块关系、主链路（以代码为准） |
 | [backend.md](./backend.md) | `backend/` | FastAPI 路由、API 契约、启动方式 |
 | [llm.md](./llm.md) | `backend/core/llm.py` | LLM 统一调用层 |
 | [tool-calling.md](./tool-calling.md) | `backend/tools/` | 工具注册与 Function Calling |
 | [react-agent.md](./react-agent.md) | `backend/agent/` | ReAct 循环：Thought → Action → Observation |
 | [rag.md](./rag.md) | `backend/rag/` | 检索增强生成完整流水线 |
 | [faiss.md](./faiss.md) | `backend/rag/vectorstore.py` | FAISS 向量索引与相似度搜索 |
-| [memory.md](./memory.md) | `backend/memory/` + `backend/agent/memory.py` | Session 记忆 vs Agent 工作记忆 |
-| [frontend.md](./frontend.md) | `frontend/` | React 聊天 UI 与 Agent 可视化预留 |
+| [memory.md](./memory.md) | `backend/memory/` + `backend/agent/memory.py` | Session / Agent / 长期记忆 |
+| [frontend.md](./frontend.md) | `frontend/` | Vue 3 聊天 UI、会话侧栏与执行可视化 |
 | [streaming.md](./streaming.md) | 流式全链路 | SSE 五层架构：LLM → Agent → API → 前端 |
 | [stop-generation.md](./stop-generation.md) | 流式 + 前后端 | 「停止生成」全链路取消（AbortController） |
 | **[interview-guide.md](./interview-guide.md)** | 全项目 | **按面试流程整理的问答指南（推荐面试前通读）** |
@@ -92,4 +92,6 @@ npm run dev
 
 ---
 
-> 文档版本与代码同步基准：`backend/main.py` 路由 + `frontend/src/pages/ChatPage.jsx` 布局。
+> **面试以代码为准，文档当复习提纲。** 同步基准：`backend/main.py` 路由 + `frontend/package.json`（Vue 3）+ `frontend/src/pages/ChatPage.vue`。
+>
+> 相对早期提纲，代码已补充：`auth/` 鉴权与多用户隔离、`conversation/` 会话持久化、长期记忆、`eval/` 评估、流式 `/chat/stream` 与停止生成——细节见 [architecture.md](./architecture.md)。

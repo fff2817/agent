@@ -57,8 +57,14 @@ class Settings(BaseSettings):
     # Top-2 分数接近时同时选中的差距阈值
     rag_route_score_delta: float = 0.05
 
-    # Session 短期记忆：最多保留几轮对话（1 轮 = user + assistant）
+    # Session 短期记忆：注入 Prompt 时保留的「最近完整轮数」（压缩窗口）
     max_session_turns: int = 10
+    # SQLite 中最多保留多少轮（>= max_session_turns，用于保留历史）
+    session_store_max_turns: int = 100
+    # 超出窗口的旧对话是否用 LLM 摘要压缩
+    session_summary_enabled: bool = True
+    # trim_messages 近似 token 上限（摘要失败时的硬裁剪）
+    session_compress_max_tokens: int = 4000
 
     # Long-term Memory 向量库目录（与 rag/store 分离）
     memory_store_path: str = "memory/store"

@@ -13,8 +13,8 @@ from eval.citation import evaluate_citations
 from eval.retrieval_judge import evaluate_retrieval
 from eval.store import get_eval_store
 from eval.types import EvaluationRecord
-from rag.chain import RAGResult
-from rag.types import SearchResult, TextChunk
+from lc.rag.chain import RAGResult
+from lc.rag.types import SearchResult, TextChunk
 
 logger = logging.getLogger(__name__)
 

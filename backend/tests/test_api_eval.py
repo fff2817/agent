@@ -75,8 +75,8 @@ def test_list_evaluations_empty(client: TestClient):
 @patch("api.rag.evaluate_rag_result")
 @patch("api.rag.rag_ask")
 def test_rag_ask_returns_evaluation(mock_rag_ask, mock_eval, client: TestClient):
-    from rag.chain import RAGResult
-    from rag.types import SearchResult, TextChunk
+    from lc.rag.chain import RAGResult
+    from lc.rag.types import SearchResult, TextChunk
 
     mock_rag_ask.return_value = RAGResult(
         question="Q",

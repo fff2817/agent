@@ -3,7 +3,6 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from agent.loop import AgentCancelledError, run_react_agent, run_react_agent_stream
 from auth.context import UserContext, set_current_user_id
 from auth.dependencies import get_current_user
 from conversation.store import (
@@ -11,10 +10,11 @@ from conversation.store import (
     get_conversation_store,
 )
 from core.sse import create_sse_response
-from memory.chain import MemoryRetrievalResult
-from memory.longterm_store import get_longterm_store
-from memory.session_store import SessionForbiddenError, get_session_store
-from memory.types import Session
+from infra.session_store import SessionForbiddenError, get_session_store
+from lc.agent.service import AgentCancelledError, run_react_agent, run_react_agent_stream
+from lc.memory.chain import MemoryRetrievalResult
+from lc.memory.conversation_memory import get_conversation_memory
+from lc.memory.types import Session
 from models.schemas import ChatRequest, ChatResponse, ReActStepSchema, RetrievedMemorySchema
 
 logger = logging.getLogger(__name__)
@@ -73,8 +73,7 @@ def _persist_conversation_turn(
 
 
 def _retrieve_longterm_memory(user_id: str, message: str) -> MemoryRetrievalResult:
-    longterm = get_longterm_store()
-    return longterm.retrieve(user_id, message)
+    return get_conversation_memory().retrieve_longterm(user_id, message)
 
 
 def _save_longterm_memory(
@@ -85,15 +84,17 @@ def _save_longterm_memory(
 ) -> None:
     if not assistant_message.strip():
         return
-    longterm = get_longterm_store()
-    result = longterm.save_turn(
+    result = get_conversation_memory().save_longterm(
+        user_id,
+        session_id,
         user_message,
         assistant_message,
-        user_id=user_id,
-        session_id=session_id,
     )
     if result.should_save:
-        logger.info("[API] 长期记忆已入库: %s", result.record.content if result.record else "")
+        logger.info(
+            "[API] 长期记忆已入库: %s",
+            result.record.content if result.record else "",
+        )
 
 
 def _memory_source_label(source_session_id: str | None) -> str:
@@ -143,6 +144,7 @@ async def chat(
       4. 返回 session_id / conversation_id 供前端续聊
     """
     session_store = get_session_store()
+    conv_memory = get_conversation_memory()
     session_id, _ = _resolve_session(session_store, _resolve_chat_id(request), user.user_id)
     _ensure_conversation(session_id, user.user_id)
 
@@ -153,7 +155,7 @@ async def chat(
         request.message[:100],
     )
 
-    history = session_store.get_history_messages(session_id)
+    history = conv_memory.load_history_for_prompt(session_id)
     memory_result = _retrieve_longterm_memory(user.user_id, request.message)
 
     try:
@@ -173,7 +175,7 @@ async def chat(
             detail="Failed to get a response from the language model. Please try again later.",
         ) from exc
 
-    session_store.add_turn(session_id, request.message, result.response)
+    conv_memory.add_turn(session_id, request.message, result.response)
     _save_longterm_memory(user.user_id, session_id, request.message, result.response)
 
     steps = [
@@ -236,9 +238,10 @@ async def chat_stream(
       - error:  错误信息
     """
     session_store = get_session_store()
+    conv_memory = get_conversation_memory()
     session_id, _ = _resolve_session(session_store, _resolve_chat_id(request), user.user_id)
     _ensure_conversation(session_id, user.user_id)
-    history = session_store.get_history_messages(session_id)
+    history = conv_memory.load_history_for_prompt(session_id)
     memory_result = _retrieve_longterm_memory(user.user_id, request.message)
     cancelled = {"value": False}
     partial_response = {"value": ""}
@@ -267,7 +270,7 @@ async def chat_stream(
                     partial_response["value"] += event.get("content", "")
 
                 if event.get("type") == "done":
-                    session_store.add_turn(
+                    conv_memory.add_turn(
                         session_id,
                         request.message,
                         event["response"],
@@ -303,7 +306,7 @@ async def chat_stream(
         except AgentCancelledError as exc:
             partial = exc.partial_response or partial_response["value"]
             if partial.strip():
-                session_store.add_turn(session_id, request.message, partial)
+                conv_memory.add_turn(session_id, request.message, partial)
                 _save_longterm_memory(user.user_id, session_id, request.message, partial)
                 _persist_conversation_turn(
                     session_id,

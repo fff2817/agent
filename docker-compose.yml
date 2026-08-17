@@ -1,36 +1,61 @@
+# 一键启动（推荐）:
+#   1. cp .env.docker.example .env   # 填入 OPENAI_API_KEY
+#   2. docker compose up --build -d
+#   3. 浏览器打开 http://localhost:8000
+#
+# Demo 账号（首次启动自动 seed）: demo / Demo2026!
+#
+# 可选：带 Caddy 反代的生产形态
+#   docker compose --profile gateway up --build -d
+
 services:
-  backend:
+  app:
     build:
-      context: ./backend
+      context: .
+      dockerfile: Dockerfile
+    container_name: agent-app
     restart: unless-stopped
     env_file:
-      - ./backend/.env.production
+      - .env
     environment:
-      SERVE_FRONTEND: "false"
+      SERVE_FRONTEND: "true"
+      RAG_STORE_PATH: /data/rag/store
+      MEMORY_STORE_PATH: /data/memory/store
+      USERS_DB_PATH: /data/data/users.db
+      SESSIONS_DB_PATH: /data/data/sessions.db
+      CONVERSATIONS_DB_PATH: /data/data/conversations.db
+      EVAL_DB_PATH: /data/data/evaluations.db
+      # 同域托管前端时 CORS 可放宽；公网请在 .env 收紧
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
     volumes:
       - agent-data:/data/data
       - agent-rag:/data/rag/store
       - agent-memory:/data/memory/store
     ports:
-      - "127.0.0.1:8000:8000"
+      - "${APP_PORT:-8000}:8000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health"]
       interval: 30s
       timeout: 5s
-      retries: 3
+      start_period: 90s
+      retries: 5
 
+  # 可选网关：对外 80/443，静态与 API 拆分（需先有 frontend/dist 或改用 app 镜像内静态）
   caddy:
+    profiles: ["gateway"]
     image: caddy:2-alpine
+    container_name: agent-caddy
     restart: unless-stopped
     depends_on:
-      backend:
+      app:
         condition: service_healthy
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      SERVE_FRONTEND: "false"
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./frontend/dist:/srv/frontend:ro
       - caddy-data:/data
       - caddy-config:/config
 

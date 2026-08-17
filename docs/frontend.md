@@ -1,47 +1,44 @@
 # 模块作用
 
-**Frontend（React 前端）** 是用户与 AI Agent 系统的 **交互界面**。
+> **面试约定**：以仓库真实代码为准；本文档是复习提纲。
+
+**Frontend（Vue 3 前端）** 是用户与 AI Agent 系统的 **交互界面**。
 
 它负责：
 
-- 展示聊天消息（用户 / 助手气泡）
-- 发送问题到 `POST /chat`，展示 Agent 最终回复
-- 上传 PDF 到知识库（`POST /documents/upload`）
-- 管理 `session_id`，支持多轮对话和「新对话」
-- **预留** Agent 执行可视化侧边栏（Thought / Action / Observation 时间线）
+- 展示聊天消息（用户 / 助手气泡），默认 **SSE 流式**打字机效果
+- 调用 `POST /chat/stream`，实时展示 token 与 ReAct steps
+- 上传多格式文档/图片到知识库（`POST /documents/upload`）
+- 管理 `session_id` / `conversation_id`（同一 UUID），会话侧栏列表与恢复
+- 登录鉴权（JWT）、执行可视化、引用、记忆与评估面板
+- 「停止生成」：`AbortController` 取消 in-flight 流式请求
 
 没有前端，后端 API 仍可用（curl / Swagger），但普通用户无法方便地使用 RAG + Agent 能力。
 
 # 核心原理
 
-## SPA + REST API
+## SPA + REST / SSE
 
-React 单页应用（Vite 构建）通过 Axios 调用 FastAPI JSON API。状态主要在 React `useState` 本地维护，**不**用 Redux 等全局库（MVP 足够简单）。
+Vue 3 单页应用（Vite 构建）通过 Axios 调 JSON API，流式聊天用 `fetch` + SSE 解析（`utils/sse.js`）。状态主要在组件 `ref` / `emit` 本地维护，不用 Vuex/Pinia（当前体量够用）。
 
-## Session 续聊原理
+## Session / Conversation 续聊
 
 ```
-第一次聊天: session_id=null → 后端新建 UUID → 返回 session_id
+第一次聊天: conversation_id=null → 后端新建 UUID → 返回 session_id
 前端: localStorage.setItem('chat_session_id', id)
-后续聊天: 带上 session_id → 后端加载历史
-新对话: 清除 localStorage + 清空 messages state
+后续聊天: 带上 id + Bearer Token → 后端加载 Session + Conversation 持久化
+刷新页面: GET /conversations/{id} 恢复消息与 steps meta
+新对话: clearSessionId + 清空 messages + 可选新建 conversation
 ```
 
-## Agent 可视化（设计 vs 现状）
+## Agent 可视化（已落地）
 
-后端 `ChatResponse.steps` 已包含完整 ReAct trace：
+后端 SSE 推送 `step` 事件 / JSON 返回 `steps`；前端：
 
-```json
-{
-  "step": 1,
-  "thought": "需要查文档...",
-  "action": "search_docs({\"query\": \"报销\"})",
-  "observation": "[1] 手册.pdf p.2 ...",
-  "final_answer": null
-}
-```
-
-`api.js` 的 `chatAPI()` **已返回** `steps`，但 `ChatBox.jsx` 目前 **只解构了 response**，未渲染 steps。`ChatPage.jsx` 的 `<aside>` 标注为 Execution Viewer 预留区。
+- `ExecutionViewer`：Thought / Action / Observation 时间线
+- `CitationPanel`：RAG 引用
+- `MemoryPanel`：短期 / 长期 / 本轮检索记忆
+- `DebugInspector`：调试面板
 
 # 项目中的实现方式
 
@@ -49,302 +46,251 @@ React 单页应用（Vite 构建）通过 Axios 调用 FastAPI JSON API。状态
 
 | 项 | 选型 |
 |----|------|
-| 框架 | React 19 |
+| 框架 | Vue 3（Composition API / `<script setup>`） |
 | 构建 | Vite 8 |
-| HTTP | Axios |
-| 语言 | JSX（无 TypeScript） |
-| 样式 | `App.css` 纯 CSS |
+| HTTP | Axios（JSON）+ fetch SSE |
+| 样式 | Tailwind CSS 4 + `App.css` |
+| 语言 | JavaScript（无 TypeScript） |
 
 ## 组件树
 
 ```
-App.jsx
-└── ChatPage.jsx
-    ├── header（标题 + 副标题）
-    ├── UploadPanel.jsx      → POST /documents/upload
-    ├── ChatBox.jsx          → 聊天主控
-    │   ├── MessageList.jsx  → 消息列表 + loading + error
-    │   └── InputBox.jsx     → 输入框
-    └── aside（sidebar 预留，aria-hidden）
+App.vue
+└── ChatPage.vue
+    ├── ConversationSidebar.vue   → /conversations CRUD
+    ├── TopBar.vue / AuthBar.vue  → 登录注册
+    ├── ChatBox.vue               → 聊天主控（默认 stream）
+    │   ├── MessageList.vue
+    │   ├── InputBox.vue          → 发送 / 停止生成 / 附件
+    │   └── UploadPanel（经 InputBox / useUpload）
+    └── DebugInspector.vue
+        ├── ExecutionViewer.vue
+        ├── CitationPanel.vue
+        ├── MemoryPanel.vue
+        └── RagEvalPanel.vue（评估）
 ```
 
 ## API 服务层
 
 `frontend/src/services/api.js`：
 
-```javascript
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+- Axios `baseURL`：`VITE_API_BASE_URL` 或同域 `window.location.origin`
+- 请求拦截器自动带 `Authorization: Bearer <token>`
+- `chatStreamAPI`：`POST /chat/stream`（主路径）
+- `chatAPI`：`POST /chat`（兼容）
+- `fetchConversations` / `fetchConversation` / 重命名 / 删除
+- `loginAPI` / `registerAPI`、上传、记忆概览、评估列表等
 
-export async function chatAPI(message, sessionId = getSessionId()) {
-  const { data } = await client.post('/chat', {
-    message,
-    session_id: sessionId || null,
-  });
-  setSessionId(data.session_id);
-  return {
-    response: data.response,
-    sessionId: data.session_id,
-    steps: data.steps || [],  // ← 已返回，UI 未用
-  };
-}
-
-export async function uploadDocument(file) {
-  // FormData, timeout 120s
-}
-```
-
-| 函数 | Timeout | 说明 |
-|------|---------|------|
-| `chatAPI` | 60s | Agent 多轮可能较慢 |
-| `uploadDocument` | 120s | PDF 解析 + Embedding 耗时 |
-
-环境变量：`frontend/.env.example` → `VITE_API_BASE_URL=http://localhost:8000`
+| 能力 | 说明 |
+|------|------|
+| 流式聊天 | SSE；支持 AbortSignal |
+| 上传 | FormData；超时更长（解析 + Embedding） |
+| 会话 | conversation_id ≡ session_id |
 
 ## ChatBox — 聊天主控
 
-`frontend/src/components/ChatBox.jsx` 核心逻辑：
+`frontend/src/components/ChatBox.vue`：
 
-1. `handleSend`：追加 user 消息 → `setLoading(true)` → `chatAPI(text, sessionId)`
-2. 成功：追加 assistant 消息，更新 sessionId
-3. 失败：展示 `err.response.data.detail` 或网络错误
-4. `handleNewChat`：`clearSessionId()` + 清空 messages
+1. `handleSend`：追加 user + 空 assistant → `chatStreamAPI`，按事件更新 content / trace
+2. `emit('execution-change')` / `memory-change` 驱动右侧面板
+3. `handleStop`：`abortControllerRef.abort()`
+4. 新对话 / 恢复会话：清空或 `restoreMessages` 从 Conversation 详情灌入
 
-**注意第 29 行**：
+## UploadPanel / 附件
 
-```javascript
-const { response, sessionId: newSessionId } = await chatAPI(text, sessionId);
-// steps 被丢弃，未存入 state
-```
-
-## MessageList — 消息展示
-
-- `MessageBubble`：区分 user / assistant 样式
-- `LoadingBubble`：三点 typing 动画
-- `useEffect` + `scrollIntoView`：新消息自动滚到底
-- 空状态：「输入问题开始对话。」
-
-## UploadPanel — PDF 上传
-
-- 隐藏 `<input type="file" accept=".pdf">`
-- 前端校验扩展名 `.pdf`
-- 成功后显示：`新增 X 个片段（知识库共 Y 个）`
-- 上传完成后 Agent 可通过 `search_docs` 检索（无需刷新页面）
+- 支持扩展名见 `utils/fileTypes.js`：PDF、DOCX、TXT、MD、常见图片等
+- 前端 `ACCEPT_ATTR` 与后端 `file_parser` 对齐
 
 ## ChatPage — 布局
 
-```jsx
-<aside className="chat-page__sidebar" aria-hidden="true" />
-```
+左侧会话列表、中间聊天、右侧 Inspector（桌面默认打开）。挂载时 `fetchConversations` + 按需 `restoreConversation`。
 
-侧边栏当前为空，注释说明预留 Execution Viewer（agent steps、tool calls、RAG citations）。
-
-## 未接入的后端能力
+## 已接入的后端能力
 
 | API | 状态 |
 |-----|------|
-| `POST /chat` | ✅ 已接入 |
-| `POST /documents/upload` | ✅ 已接入 |
-| `POST /rag/ask` | ❌ 无独立页面（通过 Agent search_docs 间接使用） |
-| `POST /rag/ingest` | ❌ 无前端入口 |
-| `ChatResponse.steps` | ⚠️ API 已返回，UI 未展示 |
+| `POST /chat/stream` | ✅ 默认聊天路径 |
+| `POST /chat` | ✅ 兼容保留 |
+| `POST /documents/upload` | ✅ |
+| `/conversations*` | ✅ 侧栏 |
+| `/auth/*` | ✅ AuthBar |
+| `/memory/*` | ✅ MemoryPanel |
+| `/rag/evaluations*` | ✅ RagEvalPanel |
+| ReAct steps / citations | ✅ ExecutionViewer + CitationPanel |
 
 # 数据流
 
-## 发送一条消息
+## 发送一条消息（流式）
 
 ```mermaid
 sequenceDiagram
     participant U as 用户
     participant IB as InputBox
     participant CB as ChatBox
-    participant API as api.js
-    participant BE as POST /chat
+    participant API as chatStreamAPI
+    participant BE as POST /chat/stream
 
     U->>IB: 输入 + Enter
     IB->>CB: onSend()
-    CB->>CB: messages += user bubble
-    CB->>API: chatAPI(text, sessionId)
-    API->>BE: { message, session_id }
-    BE-->>API: { response, session_id, steps }
-    API->>API: setSessionId(localStorage)
-    API-->>CB: { response, sessionId, steps }
-    CB->>CB: messages += assistant bubble
-    CB->>U: 显示回复
+    CB->>CB: messages += user + 空 assistant
+    CB->>API: message + conversation_id + signal
+    API->>BE: SSE
+    loop token / step / memory 事件
+        BE-->>API: event
+        API-->>CB: 更新 content / trace
+        CB-->>U: 打字机 + 右侧面板
+    end
+    BE-->>API: done
+    CB->>CB: emit conversation-updated
 ```
 
-## 上传 PDF
+## 刷新恢复
 
 ```
-用户选文件 → UploadPanel 校验 PDF
-  → FormData POST /documents/upload
-  → 后端 ingest_pdf → FAISS
-  → 显示 chunksAdded / totalChunks
-```
-
-## 实现 Agent 可视化的建议数据流
-
-```
-chatAPI 返回 steps
-  → ChatBox setState({ steps, messages })
-  → 传给 Sidebar / ExecutionViewer
-  → 按 step 渲染 Thought → Action → Observation 时间线
-  → 最后一步显示 Final Answer
+ChatPage onMounted
+  → fetchConversations
+  → fetchConversation(sessionId)
+  → ChatBox.restoreMessages(messages with meta.steps)
 ```
 
 # 面试题
 
 > 每题提供两版回答：**30 秒版**适合开场快速应答，**2 分钟版**适合面试官追问「展开讲讲」。
 
-## 前后端怎么通信？为什么用 Axios？
+## 前后端怎么通信？为什么用 Axios + fetch SSE？
 
 ### 简短回答（30秒版）
 
-REST JSON over HTTP。Axios 封装 baseURL、timeout 和错误处理。Vite 开发时前端 5173、后端 8000，靠 CORS 跨域。
+JSON 用 Axios（baseURL、超时、Bearer 拦截器）。流式聊天用 fetch + SSE 解析，因为 Axios 对 SSE 支持弱。开发 Vite 5173、API 8000 靠 CORS。
 
 ### 深入回答（2分钟版）
 
-`frontend/src/services/api.js` 创建 axios instance，`baseURL` 来自 `VITE_API_BASE_URL` 默认 localhost:8000。chat 用 JSON POST `/chat`；upload 用 FormData POST `/documents/upload`。Axios 统一拦截错误、`err.response.data.detail` 展示后端 503/502 信息。比 fetch 少写样板代码；比 React Query 轻，适合 MVP。
+`api.js` 统一鉴权头；`utils/sse.js` 的 `postSSE` 读 ReadableStream 解析 `event:` / `data:`。上传仍走 Axios FormData。比引入重型状态库更轻；面试可对比 EventSource（只支持 GET）与 fetch POST SSE。
 
-## session_id 存在哪里？刷新页面会怎样？
+## session_id / conversation_id 存在哪里？刷新会怎样？
 
 ### 简短回答（30秒版）
 
-存在 localStorage，key 是 `chat_session_id`。刷新后 ID 还在，能续后端 Session（后端未重启前提下）。消息 UI 在 React state，刷新会清空。
+localStorage 存同一 UUID。刷新后调 `/conversations/{id}` 恢复气泡与 steps；短期 Session 在后端内存，重启可能空，但 SQLite Conversation 仍可拉 UI 历史。
 
 ### 深入回答（2分钟版）
 
-`getSessionId/setSessionId/clearSessionId` 管理 localStorage。每次 chatAPI 成功写回新 session_id。「新对话」按钮 clearSessionId 并清空 messages。刷新：session_id 持久、messages 丢失，用户看到空界面但下一条消息可能带历史 context——前后端体验不一致。改进：mount 时拉 session history 或 localStorage 缓存 messages。
+`getSessionId` / `setConversationId` 共用 key。侧栏列表来自 SQLite。新对话 clear id 并可选 `POST /conversations`。鉴权用户隔离，不能读别人的 conversation（403）。
 
 ## 为什么 chat 和 upload 的 timeout 不同？
 
 ### 简短回答（30秒版）
 
-Agent 多轮 LLM 大约 60s 内；PDF 入库含解析和 Embedding 更久，upload 设 120s，避免 axios 过早 timeout。
+Agent 多轮 LLM 约分钟级；文档入库含解析和 Embedding 更久，upload 单独更长超时，避免 axios 过早杀掉仍在处理的请求。
 
 ### 深入回答（2分钟版）
 
-api.js 默认 client timeout 60000；uploadDocument 单独 120000。大 PDF chunk+embed 可能接近一分钟。timeout 过短会前端报失败而后端仍处理中，造成重复上传。生产可改异步 job：上传返回 task_id，轮询状态，timeout 只约束「提交」而非「完成」。
+大文件 chunk+embed 可能接近一分钟。timeout 过短会导致前端失败、后端仍半入库。生产可改异步 job + 轮询。流式聊天主要靠 AbortSignal，而非短 timeout。
 
 ## 前端如何实现 Agent 执行过程可视化？
 
 ### 简短回答（30秒版）
 
-用 `ChatResponse.steps` 渲染时间线：每步 Thought、Action、Observation，Final Answer 高亮。可放 ChatPage 右侧 aside 或消息下方折叠面板。
+SSE `step` 事件写入消息 `trace.steps`，ChatBox `emit('execution-change')`，右侧 `ExecutionViewer` 渲染 Thought/Action/Observation；`CitationPanel` 从 steps 抽引用。
 
 ### 深入回答（2分钟版）
 
-后端已返回 `ReActStepSchema[]`（step/thought/action/observation/final_answer）。chatAPI 已解析 `steps`，但 ChatBox 未存 state。实现：ChatBox `setSteps(newSteps)`，ChatPage aside 渲染 ExecutionViewer 组件，按 step 序号展示，Observation 可折叠，search_docs 结果高亮来源。这是「Agent 可视化」的产品化，面试可主动说后端 ready、前端待做。
+`traceParser.js` 维护流式 trace 状态与 citations。选中历史消息可回放该轮 steps / retrieved memories。这是产品化的可观测性，面试可对着 Demo 讲。
 
-## 当前 steps 为什么没展示？你会怎么改？
+## 停止生成怎么做的？
 
 ### 简短回答（30秒版）
 
-ChatBox 解构 chatAPI 返回值时只用了 response 和 sessionId，忽略了 steps。加 `useState(steps)`，send 后 setSteps，传给 sidebar 组件即可。
+InputBox「停止生成」→ `AbortController.abort()` → 浏览器断开 SSE → 后端 `is_disconnected` / 取消标志结束 Agent 循环。已输出的 token 保留在界面。
 
 ### 深入回答（2分钟版）
 
-`ChatBox.jsx` 第 29 行：`const { response, sessionId } = await chatAPI(...)` 丢弃 steps。改法：`const [steps, setSteps] = useState([])`；handleSend 里 `setSteps(newSteps)`；ChatPage 把 steps 传给 `<ExecutionViewer steps={steps} />`。样式用 timeline CSS。新对话时 clear steps。可选：每轮 assistant 消息旁加「查看推理」展开该次 steps。
+详见 [stop-generation.md](./stop-generation.md)。新对话时也会 abort in-flight 请求，避免旧流写进新会话 UI。
 
-## 为什么没有用 WebSocket / SSE？
+## 为什么默认用 SSE 而不是一次性 JSON？
 
 ### 简短回答（30秒版）
 
-MVP 请求-响应足够简单。流式输出和实时 trace 推送适合 SSE/WebSocket，需要后端改 stream，复杂度更高。
+降低首字等待、可逐步展示 ReAct step，并支持中途取消。`POST /chat` JSON 仍保留兼容。
 
 ### 深入回答（2分钟版）
 
-当前同步等完整 ChatResponse。SSE 价值：Final Answer 打字机效果、逐步显示 ReAct step 降低等待焦虑。需 `llm.py` stream + FastAPI StreamingResponse + 前端 EventSource。WebSocket 适合双向（中断生成）。Agent 多步 trace 推送比纯 RAG 流式更复杂。选型：先 SSE 只流 final token，trace 仍一次性返回。
+见 [streaming.md](./streaming.md)。Vue 响应式更新 assistant `content` 即打字机效果。Session/Conversation 在 stream 正常结束后再持久化。
 
-## 消息列表为什么只存在 React state？
+## 消息列表怎么持久化？
 
 ### 简短回答（30秒版）
 
-MVP 最简单。缺点是刷新丢失 UI 历史。可改进：后端 GET session messages，或 localStorage 缓存展示层。
+组件内 `ref` 是展示层；权威数据在后端 `ConversationStore`（SQLite）。刷新靠拉 conversation 详情，不是只靠 localStorage 消息镜像。
 
 ### 深入回答（2分钟版）
 
-ChatBox 用 `useState([])` 存 messages，createMessage 递增 id。无 global store、无 persist。优点：代码少。缺点：刷新空白、多 tab 不同步。Session 在后端有 history 但前端没拉。扩展：React Query 缓存；hydrate 时 POST /chat 不带 message 只拉 history 需新 API；或 localStorage mirror messages（注意隐私）。
+早期 MVP 刷新会空白；现在侧栏 + restore 已接好。Session 仍服务 Agent Prompt；Conversation 服务 UI。多 tab 以服务端为准。
 
 ## 如何防止用户重复点击发送？
 
 ### 简短回答（30秒版）
 
-loading 为 true 时 handleSend 直接 return，InputBox disabled={loading}。我们已实现。
+`loading` 为 true 时 `handleSend` 直接 return；InputBox 生成中切「停止」态。
 
 ### 深入回答（2分钟版）
 
-ChatBox：``if (!text || loading) return``；setLoading(true) 在 try/finally false。InputBox 禁输入和按钮。可防止 double submit 导致重复 Agent 运行和双倍 token 成本。还可加：debounce Enter、发送中 disable「新对话」、request id 去重。并发两条 in-flight 目前未防，可加 abortController 取消上一轮。
+可防止 double submit 双倍 token。并发上一轮未结束时应用 abort 再发，或禁用发送直至结束——当前以 loading 门禁为主。
 
 ## CORS 错误前端怎么排查？
 
 ### 简短回答（30秒版）
 
-看浏览器控制台 blocked by CORS；确认 VITE_API_BASE_URL 指向正确后端；确认后端 CORSMiddleware 已开；检查 mixed content（HTTPS 页请求 HTTP API）。
+看控制台 CORS；确认 `VITE_API_BASE_URL`；确认后端 `cors_origins`；检查 HTTPS 页请求 HTTP。
 
 ### 深入回答（2分钟版）
 
-典型报错：No Access-Control-Allow-Origin。排查链：Network tab 看 preflight OPTIONS；backend main.py allow_origins；开发是否 5173→8000；生产是否域名不匹配。axios baseURL  typo 导致 404 有时误似 CORS。credentials 模式需具体 origin 不能 `*`。Postman 能通但浏览器不通，基本就是 CORS。
+生产应用具体域名而非 `*`；带 credentials 时不能 `*`。同域部署（`serve_frontend`）可减少跨域问题。
 
-## 如果要加流式打字机效果，改哪里？
+## 鉴权前端怎么接的？
 
 ### 简短回答（30秒版）
 
-后端 llm stream + API SSE；前端 EventSource 或 fetch reader 逐 token append 到 assistant bubble。Agent 模式需定义流 Final Answer 还是流 trace。
+注册/登录拿 JWT 存 localStorage，Axios 拦截器带 Bearer。开发 `auth_disabled` 时可无 Token。
 
 ### 深入回答（2分钟版）
 
-最小改动：仅 RAG 或 Agent 最后一答 stream。ChatBox 增加 streamingMessage state，append delta.content。axios 不支持 SSE，用 fetch + ReadableStream 或 eventsource。UI：LoadingBubble 改为 growing text。Agent 若 stream trace，aside 逐步 append step。Session add_turn 移到 stream end 事件。
+`AuthBar` + `setAuthSession`。登出 `clearAuthSession` 同时清 conversation id。多用户下文档与记忆按 user 隔离，前端勿缓存跨用户数据。
 
-## UploadPanel 为什么只接受 PDF？
+## Upload 为什么不只限 PDF？
 
 ### 简短回答（30秒版）
 
-后端 loader 目前 PDF 入库路径最完整；前端校验扩展名与后端一致。扩展 docx/md 需前后端同时改。
+后端 `file_parser` 已支持 PDF/DOCX/TXT/MD/图片等；前端 `fileTypes.js` 的 accept 与之对齐。
 
 ### 深入回答（2分钟版）
 
-UploadPanel 检查 `.pdf`；documents API 调 ingest_pdf。pypdf 提取文本。扫描 PDF 无 OCR 会失败。产品文案写「供 search_docs 检索」对齐能力边界。加 docx：loader 新函数、accept 属性、后端 MIME 校验、ingest 路由分支。
+图片走视觉模型解析（`openai_vision_model`）。面试说清「解析层与向量入库分层」，不要只说 PDF。
 
 ## 生产环境前端部署要注意什么？
 
 ### 简短回答（30秒版）
 
-npm run build 静态文件放 Nginx；VITE_API_BASE_URL 指向生产 API；HTTPS；CORS 限定域名；不要开发环境的 allow_origins=*。
+`npm run build`；Nginx 或后端 `serve_frontend` 托管 dist；正确 API 基址；HTTPS；CORS 白名单；Token 防 XSS。
 
 ### 深入回答（2分钟版）
 
-Vite build 输出 dist/，Nginx root + try_files SPA fallback。环境变量 build 时注入，staging/prod 不同 .env.production。API 独立域名 api.example.com，CORS 白名单 frontend 域名。开启 gzip/brotli；静态资源 cache。安全：不在 frontend 存 API secret；session_id localStorage 在 XSS 下可被偷，需 CSP。Monitor 4xx/5xx 和 LCP。
+环境变量 build 时注入。静态缓存 + SPA fallback。安全：不把 API secret 放前端；CSP；监控 4xx/5xx。
 
 # 容易踩坑的问题
 
-1. **后端未启动**：前端显示「无法连接服务器」，需先 `uvicorn main:app`。
-2. **VITE_API_BASE_URL 未配**：默认 localhost:8000，部署忘改会连错环境。
-3. **steps 已有但未用**：面试说「支持可视化」要诚实：后端 ready，前端待做。
-4. **新对话只清前端**：localStorage 清了，但用户可能期望后端也删 Session（当前未提供 DELETE API）。
-5. **长回复无 markdown**：`message-content` 纯文本 `<p>`，表格/代码块不渲染。
+1. **后端未启动**：前端「无法连接服务器」。
+2. **VITE_API_BASE_URL 未配**：部署连错环境。
+3. **说成 React**：实际是 Vue 3（`package.json` + `*.vue`）。
+4. **以为 steps 未做**：已接入 ExecutionViewer。
+5. **新对话只清前端**：应 abort 流 + clear id；后端旧 Session 可能残留内存（可接受）。
 
 # 进阶知识
 
-- **React Query / SWR**：请求缓存与重试
-- **SSE 流式 UI**：`ReadableStream` 逐 token 渲染（详见 [stop-generation.md](./stop-generation.md)）
-- **ExecutionViewer 组件设计**：步骤条 + 工具图标 + 可展开 Observation
-- **react-markdown**：助手回复支持 Markdown
+- **Pinia**：跨页共享会话状态
+- **SSE 与重连**：断线续传、Last-Event-ID
+- **markdown 渲染**：助手回复代码块/表格
+- **Vitest + Vue Test Utils**：组件测试
 - **i18n**：界面多语言
-- **Vitest + Testing Library**：组件测试
 
-## 快速实现 ExecutionViewer（练习）
-
-```jsx
-// ChatBox.jsx 中
-const [steps, setSteps] = useState([]);
-
-const { response, sessionId: newSessionId, steps: newSteps } = await chatAPI(text, sessionId);
-setSteps(newSteps);
-
-// ChatPage.jsx 中
-<aside className="chat-page__sidebar">
-  <ExecutionViewer steps={steps} />
-</aside>
-```
-
-**相关文档**：[backend.md](./backend.md) · [react-agent.md](./react-agent.md) · [memory.md](./memory.md) · [architecture.md](./architecture.md)
+**相关文档**：[backend.md](./backend.md) · [streaming.md](./streaming.md) · [stop-generation.md](./stop-generation.md) · [architecture.md](./architecture.md)

@@ -1,0 +1,41 @@
+# Git / IDE
+.git
+.gitignore
+.cursor
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+
+# Node
+frontend/node_modules
+frontend/dist
+
+# 本地数据与密钥（运行时用卷 / env_file）
+**/.env
+**/.env.local
+**/.env.production
+backend/data
+backend/rag/store
+backend/memory/store
+**/sessions.db
+**/users.db
+**/conversations.db
+**/evaluations.db
+
+# 文档与杂项（缩小构建上下文）
+docs
+*.md
+!deploy/DOCKER.md
+agent-transcripts
+terminals
+canvases
+**/*.log
+.DS_Store
+Thumbs.db
+
+# 云平台专用（可选保留在镜像外）
+frontend/vercel.json
+backend/railway.toml

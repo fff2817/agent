@@ -13,7 +13,7 @@ from models.schemas import (
     RetrievalEvalSchema,
     RetrievalItemEvalSchema,
 )
-from rag.chain import RAGResult
+from lc.rag.chain import RAGResult
 
 
 def _merge_sources_with_retrieval(record: EvaluationRecord) -> list[RAGSourceSchema]:
