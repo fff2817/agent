@@ -3,10 +3,10 @@ Chroma 向量索引 — 可运行演示（LangChain Chroma）。
 
 用法（backend 目录）:
     # 使用 mock 向量（无需 API Key，验证 Chroma 存取）
-    .venv\\Scripts\\python.exe -m scripts.demos.demo_faiss --mock
+    .venv\\Scripts\\python.exe -m scripts.demos.demo_chroma --mock
 
     # 使用真实 Embedding API
-    .venv\\Scripts\\python.exe -m scripts.demos.demo_faiss
+    .venv\\Scripts\\python.exe -m scripts.demos.demo_chroma
 
 流程:
     1. 每个 chunk 变成高维向量（Embedding）
@@ -23,7 +23,7 @@ import sys
 
 import numpy as np
 
-from infra.rag_vectorstore import FaissVectorStore
+from infra.rag_vectorstore import RagVectorStore
 from lc.llm.embeddings import embed_chunks
 from lc.rag.chunker import chunk_plain_text
 from lc.rag.types import EmbeddedChunk, TextChunk
@@ -122,14 +122,14 @@ def main() -> None:
     print(f"  已向量化 {len(embedded)} 条, 维度={embedded[0].dimensions}")
 
     _banner("Step C — 写入 Chroma 并保存")
-    store = FaissVectorStore(store_dir=args.store)
+    store = RagVectorStore(store_dir=args.store)
     store.clear()
     store.add_embeddings(embedded)
     store.save()
     print(f"\n  持久化目录: {args.store}/chroma.sqlite3")
 
     _banner("Step D — 从磁盘重新打开")
-    store2 = FaissVectorStore(store_dir=args.store)
+    store2 = RagVectorStore(store_dir=args.store)
     print(f"  已加载 {store2.count} 条向量")
 
     _banner("Step E — Similarity Search (Top-3)")

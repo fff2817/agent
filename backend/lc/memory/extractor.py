@@ -8,7 +8,7 @@ Long-term Memory 筛选器 — 决定「什么值得存」。
         ↓  ExtractionResult（should_save + MemoryRecord）
 
 设计原因:
-    不能每句话都 embed 进 FAISS — 噪声会污染检索、浪费 API 成本。
+    不能每句话都 embed 进 Chroma — 噪声会污染检索、浪费 API 成本。
     先用规则过滤 80% 无效输入，再对边界 case 打分。
 """
 

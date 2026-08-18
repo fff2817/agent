@@ -3,7 +3,7 @@ Long-term Memory 门面 — 对外提供 retrieve / save_turn。
 
 接入方式:
     1. retrieve(user_id, query) → MemoryRetrievalResult（检索 + Top-K + hints）
-    2. save_turn(...) → 筛选 + Embedding + FAISS 入库
+    2. save_turn(...) → 筛选 + Embedding + Chroma 入库
     3. search(...) → hints[] 简写（兼容旧调用）
 """
 
@@ -23,7 +23,7 @@ class LongTermStore:
 
     def retrieve(self, user_id: str, query: str) -> MemoryRetrievalResult:
         """
-        完整检索链路: 判断是否检索 → FAISS Top-K → 生成 hints/context。
+        完整检索链路: 判断是否检索 → Chroma Top-K → 生成 hints/context。
 
         供 /chat Agent 路径在 run_react_agent 之前调用。
         """

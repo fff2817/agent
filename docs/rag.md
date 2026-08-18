@@ -42,7 +42,7 @@ Generation: LLM 读 Prompt 生成答案
 | `chunker.py` | 滑动窗口切分，默认 500/50 |
 | `embedder.py` | 调用 Embedding API |
 | `ingest.py` | 入库流水线 orchestration |
-| `vectorstore.py` | FAISS 存取（见 faiss.md） |
+| `vectorstore.py` | Chroma 存取（见 chroma.md） |
 | `retriever.py` | `search_similar()` |
 | `prompt_builder.py` | RAG system prompt + context 格式化 |
 | `chain.py` | `rag_ask()` 完整 6 步 |
@@ -56,7 +56,7 @@ Generation: LLM 读 Prompt 生成答案
 PDF → load_pdf() → ExtractedDocument
     → chunk_document() → TextChunk[]
     → embed_chunks() → EmbeddedChunk[]
-    → FaissVectorStore.add_embeddings() + save()
+    → RagVectorStore.add_embeddings() + save()
 ```
 
 HTTP 入口：
@@ -71,7 +71,7 @@ HTTP 入口：
 ```53:151:backend/rag/chain.py
 def rag_ask(question, store=None, top_k=None, history=None) -> RAGResult:
     // Step 1: 接收问题
-    // Step 2-3: embed + FAISS search → sources
+    // Step 2-3: embed + Chroma search → sources
     // Step 5: build_rag_messages()
     // Step 6: chat_completion(messages, tools=None)
 ```
@@ -100,7 +100,7 @@ def rag_ask(question, store=None, top_k=None, history=None) -> RAGResult:
 教学用 CLI：
 
 - `python -m rag.demo_rag --ingest`
-- `python -m rag.demo_faiss`
+- `python -m scripts.demos.demo_chroma`
 - `python -m rag.demo_embedding`
 - `python -m rag.demo_pdf_chunk`
 
@@ -113,8 +113,8 @@ flowchart LR
     PDF[PDF 文件] --> L[loader]
     L --> C[chunker]
     C --> E[embedder]
-    E --> VS[FaissVectorStore]
-    VS --> DISK[faiss.index + metadata.json]
+    E --> VS[RagVectorStore]
+    VS --> DISK[chroma.sqlite3（Chroma 持久化）]
 ```
 
 ## 在线问答
@@ -150,17 +150,17 @@ RAG 就是检索增强生成：先查知识库，再让大模型带着查到的�
 
 ### 深入回答（2分钟版）
 
-RAG 把「Indexing → Retrieval → Augmentation → Generation」四步串起来：离线把文档切块、向量化存 FAISS，在线把问题 embed 后检索 Top-K，再拼进 Prompt 让 LLM 生成。本项目 `backend/rag/` 实现两条路径：`POST /rag/ask` 走 `chain.py` 的 `rag_ask()` 完整六步；Agent 则通过 `search_docs` 只检索、由 ReAct 循环组织答案。相比 Fine-tune，知识可热更新、回答可溯源（返回 `sources` 含页码），适合企业文档 QA 这类 MVP 场景。
+RAG 把「Indexing → Retrieval → Augmentation → Generation」四步串起来：离线把文档切块、向量化存 Chroma，在线把问题 embed 后检索 Top-K，再拼进 Prompt 让 LLM 生成。本项目 `backend/rag/` 实现两条路径：`POST /rag/ask` 走 `chain.py` 的 `rag_ask()` 完整六步；Agent 则通过 `search_docs` 只检索、由 ReAct 循环组织答案。相比 Fine-tune，知识可热更新、回答可溯源（返回 `sources` 含页码），适合企业文档 QA 这类 MVP 场景。
 
 ## 你们的 RAG pipeline 分几步？对应哪些文件？
 
 ### 简短回答（30秒版）
 
-分两条线：离线索引和在线问答。入库是 load → chunk → embed → 存 FAISS；问答是 embed 问题 → 检索 → 拼 Prompt → 调 LLM。核心编排分别在 `ingest.py` 和 `chain.py`。
+分两条线：离线索引和在线问答。入库是 load → chunk → embed → 存 Chroma；问答是 embed 问题 → 检索 → 拼 Prompt → 调 LLM。核心编排分别在 `ingest.py` 和 `chain.py`。
 
 ### 深入回答（2分钟版）
 
-**离线索引**（`ingest.py`）：PDF 经 `loader.py` 的 `load_pdf()` 得到 `ExtractedDocument`，`chunker.py` 的 `chunk_document()` 切成 `TextChunk[]`，`embedder.py` 的 `embed_chunks()` 向量化，`vectorstore.py` 的 `FaissVectorStore.add_embeddings()` 写入并 save。HTTP 入口是 `POST /documents/upload` 和 `POST /rag/ingest`。**在线问答**（`chain.py` 六步）：Step 1 接收问题 → Step 2-3 `retriever.py` 的 `search_similar()`（embed + FAISS Top-K）→ Step 5 `prompt_builder.py` 的 `build_rag_messages()` → Step 6 `chat_completion()` 无 tools 生成答案，返回 `RAGResult`（含 answer、sources、context）。
+**离线索引**（`ingest.py`）：PDF 经 `loader.py` 的 `load_pdf()` 得到 `ExtractedDocument`，`chunker.py` 的 `chunk_document()` 切成 `TextChunk[]`，`embedder.py` 的 `embed_chunks()` 向量化，`vectorstore.py` 的 `RagVectorStore.add_embeddings()` 写入并 save。HTTP 入口是 `POST /documents/upload` 和 `POST /rag/ingest`。**在线问答**（`chain.py` 六步）：Step 1 接收问题 → Step 2-3 `retriever.py` 的 `search_similar()`（embed + Chroma Top-K）→ Step 5 `prompt_builder.py` 的 `build_rag_messages()` → Step 6 `chat_completion()` 无 tools 生成答案，返回 `RAGResult`（含 answer、sources、context）。
 
 ## chunk_size 和 chunk_overlap 怎么选？
 
@@ -220,7 +220,7 @@ RAG 适合知识频繁更新、需要引用出处的场景，改文档重新入�
 
 ### 深入回答（2分钟版）
 
-`retriever.py` 的 FAISS 搜索即使命中也会返回结果，但可能是低相关 chunk；`format_context()` 在 `sources` 为空时返回「（未检索到任何相关文档片段）」并打 warning 日志。`RAG_SYSTEM_PROMPT` 第 2 条要求模型回答「根据现有文档，未找到相关信息」。`search_docs.py` 的 `format_search_results()` 空结果时返回「未在知识库中找到相关文档片段」，Agent 据此决定是否换 query 或告知用户。向量库为空时，`chain.py` 直接抛 `ValueError("向量库为空，请先入库文档")`，`search_docs` 则提示先上传 PDF。不应在空 context 下让 LLM 猜测。
+`retriever.py` 的 Chroma 搜索即使命中也会返回结果，但可能是低相关 chunk；`format_context()` 在 `sources` 为空时返回「（未检索到任何相关文档片段）」并打 warning 日志。`RAG_SYSTEM_PROMPT` 第 2 条要求模型回答「根据现有文档，未找到相关信息」。`search_docs.py` 的 `format_search_results()` 空结果时返回「未在知识库中找到相关文档片段」，Agent 据此决定是否换 query 或告知用户。向量库为空时，`chain.py` 直接抛 `ValueError("向量库为空，请先入库文档")`，`search_docs` 则提示先上传 PDF。不应在空 context 下让 LLM 猜测。
 
 ## Agent 里的 search_docs 和 rag_ask 有什么区别？
 
@@ -230,7 +230,7 @@ RAG 适合知识频繁更新、需要引用出处的场景，改文档重新入�
 
 ### 深入回答（2分钟版）
 
-两者共用 `retriever.py` 的 `search_similar()` 和同一个 FAISS 索引。`search_docs.py` 的 `run_search_docs()` 格式化 Observation 给 Agent（含 rank、source、page、score），Agent 可组合 calculator 等工具做多步推理。`chain.py` 的 `rag_ask()` 检索后走 `build_rag_messages()` 固定模板，一次 `chat_completion` 出答案，返回 `RAGResult` 含结构化 sources。对比：Agent 路径灵活但 trace 复杂；`/rag/ask` 路径短、适合纯文档 QA 前端。`search_docs` 用 config 的 `retrieval_top_k`，`rag_ask` 还可通过 API 传 `top_k` 覆盖。
+两者共用 `retriever.py` 的 `search_similar()` 和同一个 Chroma 索引。`search_docs.py` 的 `run_search_docs()` 格式化 Observation 给 Agent（含 rank、source、page、score），Agent 可组合 calculator 等工具做多步推理。`chain.py` 的 `rag_ask()` 检索后走 `build_rag_messages()` 固定模板，一次 `chat_completion` 出答案，返回 `RAGResult` 含结构化 sources。对比：Agent 路径灵活但 trace 复杂；`/rag/ask` 路径短、适合纯文档 QA 前端。`search_docs` 用 config 的 `retrieval_top_k`，`rag_ask` 还可通过 API 传 `top_k` 覆盖。
 
 ## 多轮对话 RAG 要注意什么？
 
@@ -240,7 +240,7 @@ RAG 适合知识频繁更新、需要引用出处的场景，改文档重新入�
 
 ### 深入回答（2分钟版）
 
-`api/rag.py` 的 `/rag/ask` 通过 `SessionStore` 加载 `history`，传给 `rag_ask(..., history=history)`，答完后 `add_turn` 保存。`build_rag_messages()` 结构是 system → history → 当前 user（含本轮检索资料 + 问题），即 **每轮都重新 embed 和 FAISS 检索**，不会复用上一轮 chunk。这避免了「上一轮资料已过时但仍被引用」的问题。注意 history 和 Top-K context 叠加会快速消耗 context window，`config.py` 的 `max_session_turns=10` 限制短期记忆轮数。追问场景（「刚才说的报销，第二步呢？」）依赖 history 提供指代，但检索 query 仍用当前问题原文，必要时可做 query rewrite。
+`api/rag.py` 的 `/rag/ask` 通过 `SessionStore` 加载 `history`，传给 `rag_ask(..., history=history)`，答完后 `add_turn` 保存。`build_rag_messages()` 结构是 system → history → 当前 user（含本轮检索资料 + 问题），即 **每轮都重新 embed 和 Chroma 检索**，不会复用上一轮 chunk。这避免了「上一轮资料已过时但仍被引用」的问题。注意 history 和 Top-K context 叠加会快速消耗 context window，`config.py` 的 `max_session_turns=10` 限制短期记忆轮数。追问场景（「刚才说的报销，第二步呢？」）依赖 history 提供指代，但检索 query 仍用当前问题原文，必要时可做 query rewrite。
 
 ## 如何评估 RAG 质量？
 
@@ -278,4 +278,4 @@ RAG 适合知识频繁更新、需要引用出处的场景，改文档重新入�
 - **Query Transformation**：HyDE、多 query 检索
 - **GraphRAG**：知识图谱 + 向量
 
-**相关文档**：[faiss.md](./faiss.md) · [tool-calling.md](./tool-calling.md) · [architecture.md](./architecture.md)
+**相关文档**：[chroma.md](./chroma.md) · [tool-calling.md](./tool-calling.md) · [architecture.md](./architecture.md)

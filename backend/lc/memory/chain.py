@@ -7,7 +7,7 @@ Long-term Memory 完整检索链路 — 对标 rag/chain.py。
         ↓  [Step 1] should_retrieve_memory() — 是否需要检索
     Embedding（问题向量化）
         ↓  [Step 2] embed_text()
-    FAISS Search（相似度检索）
+    Chroma Search（相似度检索）
         ↓  [Step 3] MemoryVectorStore.search() → Top-K
     Prompt 拼接
         ↓  [Step 4] build_memory_messages() / build_memory_system_section()
@@ -117,7 +117,7 @@ def retrieve_memories_for_question(
         )
 
     logger.info("[MemoryChain] Step 2 — Embedding: 问题向量化")
-    logger.info("[MemoryChain] Step 3 — FAISS Search: Top-K 检索")
+    logger.info("[MemoryChain] Step 3 — Chroma Search: Top-K 检索")
 
     k = top_k or settings.memory_top_k
     query_vector = embed_text(question)

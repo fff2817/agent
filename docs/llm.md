@@ -178,7 +178,7 @@ temperature 越高越发散，越低越稳定。0.7 是常见默认，Agent 推�
 
 ### 深入回答（2分钟版）
 
-OpenAI Python SDK 支持自定义 `base_url`。本项目 `config.py` 的 `openai_base_url` 默认示例为 `https://open.bigmodel.cn/api/paas/v4`，模型 `glm-4.7`，Embedding `embedding-3`。切换时改 `.env` 四项即可，Agent/RAG/ingest 无感。注意：Embedding 维度变化需重建 FAISS；智谱 tool calling 若格式有差异，改动收敛在 `llm.py` 和 `parser.py`。
+OpenAI Python SDK 支持自定义 `base_url`。本项目 `config.py` 的 `openai_base_url` 默认示例为 `https://open.bigmodel.cn/api/paas/v4`，模型 `glm-4.7`，Embedding `embedding-3`。切换时改 `.env` 四项即可，Agent/RAG/ingest 无感。注意：Embedding 维度变化需重建向量索引；智谱 tool calling 若格式有差异，改动收敛在 `llm.py` 和 `parser.py`。
 
 ## Tool Calling 和传统 Prompt 里写 JSON 有什么区别？
 
@@ -248,7 +248,7 @@ LLM 层不负责拼 prompt，只负责发送 messages。Agent 在 `loop.py` 放 
 
 ### 深入回答（2分钟版）
 
-Chat 输入 messages 数组，输出 assistant message。Embedding 输入 text/string[]，输出 float 向量。本项目 `core/llm.py` 只管 chat；`rag/embedder.py` 的 `embed_text/embed_chunks` 调 embeddings API。入库和检索都依赖 embedder，与 Agent 的 chat 路径解耦。换 Embedding 模型只动 embedder 和 FAISS 重建，不动 ReAct loop。
+Chat 输入 messages 数组，输出 assistant message。Embedding 输入 text/string[]，输出 float 向量。本项目 `core/llm.py` 只管 chat；`rag/embedder.py` 的 `embed_text/embed_chunks` 调 embeddings API。入库和检索都依赖 embedder，与 Agent 的 chat 路径解耦。换 Embedding 模型只动 embedder 和 Chroma 重建，不动 ReAct loop。
 
 ## 如何做 LLM 调用的重试和超时？
 

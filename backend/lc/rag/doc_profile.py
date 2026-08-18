@@ -127,7 +127,7 @@ def build_document_profile(
     if doc_type == "requirements" and "需求" not in topics:
         topics = (topics + ["需求"])[:6]
     if file_type == "markdown" and doc_type == "other" and any(
-        t.lower() in {"faiss", "rag", "embedding", "向量"} for t in keywords
+        t.lower() in {"chroma", "rag", "embedding", "向量"} for t in keywords
     ):
         doc_type = "notes"
 

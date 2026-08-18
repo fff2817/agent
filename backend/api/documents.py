@@ -1,7 +1,7 @@
 """
 文档上传 API — 多格式入库入口。
 
-POST   /documents/upload              接收文件 → 保存 → 切分 → Embedding → FAISS
+POST   /documents/upload              接收文件 → 保存 → 切分 → Embedding → Chroma
 GET    /documents                     列出当前用户已上传文件
 POST   /documents/delete?filename=... 删除文件及对应向量 / catalog
 """
@@ -94,7 +94,7 @@ async def delete_document(
     filename: str = Query(..., min_length=1, description="要删除的文件名"),
     user: UserContext = Depends(get_current_user),
 ) -> dict:
-    """删除已上传文档：磁盘文件 + catalog + FAISS chunks。"""
+    """删除已上传文档：磁盘文件 + catalog + Chroma chunks。"""
     safe_name = _safe_filename(filename)
     if not safe_name:
         raise HTTPException(status_code=400, detail="Filename is required")
@@ -148,7 +148,7 @@ async def upload_document(
     file: UploadFile = File(...),
     user: UserContext = Depends(get_current_user),
 ) -> DocumentUploadResponse:
-    """上传文档并入库到当前用户的 FAISS 向量库。支持 PDF、DOCX、TXT、MD、图片。"""
+    """上传文档并入库到当前用户的 Chroma 向量库。支持 PDF、DOCX、TXT、MD、图片。"""
     if not file.filename:
         logger.warning("[API/Docs] 上传缺少文件名（多为 multipart Content-Type 错误）")
         raise HTTPException(status_code=400, detail="Filename is required")

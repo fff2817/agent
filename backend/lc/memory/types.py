@@ -70,7 +70,7 @@ class MemoryType(str, Enum):
 @dataclass
 class MemoryRecord:
     """
-    一条长期记忆 — FAISS metadata 与业务层共用。
+    一条长期记忆 — Chroma metadata 与业务层共用。
 
     content 必须是第三人称事实句（便于检索），
     例如「用户姓名：张三」，而不是 raw「我叫张三」。

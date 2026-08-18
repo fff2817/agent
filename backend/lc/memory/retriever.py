@@ -1,5 +1,5 @@
 """
-Long-term Memory 检索器 — query → Embedding → FAISS Top-K。
+Long-term Memory 检索器 — query → Embedding → Chroma Top-K。
 
 与 rag/retriever.py 同构，但:
     · 索引路径不同（memory/store）

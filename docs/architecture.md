@@ -11,9 +11,9 @@
 | ReAct Agent | 让 LLM 能「思考 → 调工具 → 看结果 → 再思考」，而不是一次性瞎编 |
 | Tool Calling | 把计算器、文档检索等能力封装成 LLM 可调用的函数 |
 | RAG | 基于上传文档的知识库回答，减少幻觉 |
-| FAISS | 高效存储和检索文档 / 长期记忆向量 |
+| Chroma | 高效存储和检索文档 / 长期记忆向量 |
 | Session Memory | 多轮对话短期上下文（SQLite，FIFO） |
-| Long-term Memory | 跨会话抽取与检索用户偏好/事实（FAISS） |
+| Long-term Memory | 跨会话抽取与检索用户偏好/事实（Chroma） |
 | Conversation | SQLite 持久化会话列表与完整消息（含 steps 元数据） |
 | Auth | 注册/登录、JWT / API Key、按 `user_id` 多用户隔离 |
 | Eval | RAG 检索/回答/引用评分与历史查询 |
@@ -23,7 +23,7 @@
 **主业务链路：**
 
 1. **Agent 聊天链**：`POST /chat` 或 `POST /chat/stream` → 鉴权 → Session + 长期记忆检索 → ReAct 循环 → 可能调用 `calculator` / `search_docs` → 写回 Session + Conversation + 长期记忆
-2. **RAG 链**：上传文档 → 入库 FAISS → 通过 `/rag/ask` 或 Agent 的 `search_docs` 工具检索（可触发 Eval）
+2. **RAG 链**：上传文档 → 入库 Chroma → 通过 `/rag/ask` 或 Agent 的 `search_docs` 工具检索（可触发 Eval）
 3. **会话管理链**：`/conversations*` CRUD，与 `session_id` / `conversation_id` 共用同一 UUID
 
 # 核心原理
@@ -45,7 +45,7 @@
 └───────┬──────────┬──────────┬──────────┬─────────────────┘
         ▼          ▼          ▼          ▼
  SessionStore  Conversation  LongTerm   RAG / Eval
- (短期记忆)    Store(SQLite) Store      FaissVectorStore
+ (短期记忆)    Store(SQLite) Store      RagVectorStore
         │          │          │          │
         └──────────┴────┬─────┴──────────┘
                         ▼
@@ -60,7 +60,7 @@
 
 1. **LLM 层与 Agent 层分离**：`core/llm.py` 只负责发请求（含流式），ReAct 逻辑在 `agent/`
 2. **工具可插拔**：新工具只需改 `tools/registry.py`，不改 Agent 循环
-3. **RAG 双入口**：独立 API（`/rag/ask`）和 Agent 工具（`search_docs`）共用同一 FAISS 索引
+3. **RAG 双入口**：独立 API（`/rag/ask`）和 Agent 工具（`search_docs`）共用同一 Chroma 索引
 4. **多层 Memory**：Session（短期）+ AgentMemory（单次请求）+ LongTerm（跨会话）+ Conversation（UI 持久化）
 5. **按用户隔离**：文档、Session、Conversation、长期记忆、评估记录均绑定 `user_id`
 6. **流式为默认交互**：聊天 UI 走 SSE；JSON `/chat` 保留兼容
@@ -78,8 +78,8 @@ agent/
 │   ├── auth/                   # JWT / API Key、UserStore、依赖注入
 │   ├── agent/                  # ReAct 循环（含 stream / cancel）
 │   ├── tools/                  # calculator, search_docs, list_documents
-│   ├── rag/                    # 入库 + 检索 + FAISS + 文档路由
-│   ├── memory/                 # Session + 长期记忆（FAISS）
+│   ├── rag/                    # 入库 + 检索 + Chroma + 文档路由
+│   ├── memory/                 # Session + 长期记忆（Chroma）
 │   ├── conversation/           # SQLite 会话持久化
 │   ├── eval/                   # RAG 评估流水线与存储
 │   ├── file_parser/            # PDF / DOCX / 图片等解析
@@ -128,7 +128,7 @@ agent/
 |------|------|------|
 | `memory/session_store.py` | Agent 短期上下文注入（最近 N 轮，FIFO） | SQLite（`sessions.db`） |
 | `conversation/store.py` | UI 历史列表、完整消息恢复（含 steps 等 meta） | SQLite（`conversations.db`） |
-| `memory/longterm_store.py` | 跨会话事实/偏好检索与入库 | 独立 FAISS |
+| `memory/longterm_store.py` | 跨会话事实/偏好检索与入库 | 独立 Chroma |
 
 `conversation_id` 与 `session_id` 使用同一 UUID（`api/chat.py` 中 `conversation_id` 优先）。
 
@@ -138,7 +138,7 @@ agent/
 
 1. 鉴权通过后加载 Session 历史，并按需检索长期记忆注入 Prompt
 2. ReAct Agent 的 Planner 调用 LLM，LLM 选择 `search_docs` 工具
-3. `search_docs` 内部调用 `rag/retriever.py` → FAISS 检索（按用户隔离）
+3. `search_docs` 内部调用 `rag/retriever.py` → Chroma 检索（按用户隔离）
 4. 检索结果作为 Observation 回到 Agent 循环
 5. 下一轮 Planner 基于 Observation 生成 Final Answer
 6. 写回 Session、Conversation，并尝试抽取长期记忆
@@ -212,7 +212,7 @@ sequenceDiagram
     participant API as POST /documents/upload
     participant ING as ingest
     participant EMB as embedder
-    participant VS as FaissVectorStore
+    participant VS as RagVectorStore
 
     U->>FE: 选择文件
     FE->>API: multipart/form-data + 鉴权
@@ -228,7 +228,7 @@ sequenceDiagram
 POST /rag/ask
   → 鉴权
   → SessionStore 加载历史
-  → rag_ask(): embed → FAISS search → build_rag_messages → LLM
+  → rag_ask(): embed → Chroma search → build_rag_messages → LLM
   → 可选 Eval 流水线落库
   → SessionStore 保存本轮
   → 返回 answer + sources
@@ -247,7 +247,7 @@ POST /rag/ask
 
 ### 深入回答（2分钟版）
 
-前端 Vue 3（Vite）提供 `ChatPage`、会话侧栏、上传与执行可视化，默认调 `POST /chat/stream`。请求先过 `auth/dependencies` 得到 `user_id`。`SessionStore` 注入短期历史，`LongTermStore` 检索跨会话记忆，再进入 `run_react_agent` / `_stream`：`core/llm.py` 发请求，`tools/registry` 执行 calculator 或 search_docs，SSE 推送 step 与 token。结束后写 Session、`ConversationStore`（SQLite）并尝试长期记忆入库。PDF 等文档走 ingest → Embedding → 用户隔离的 `FaissVectorStore`；`/rag/ask` 是固定 RAG 链，并可走 Eval。
+前端 Vue 3（Vite）提供 `ChatPage`、会话侧栏、上传与执行可视化，默认调 `POST /chat/stream`。请求先过 `auth/dependencies` 得到 `user_id`。`SessionStore` 注入短期历史，`LongTermStore` 检索跨会话记忆，再进入 `run_react_agent` / `_stream`：`core/llm.py` 发请求，`tools/registry` 执行 calculator 或 search_docs，SSE 推送 step 与 token。结束后写 Session、`ConversationStore`（SQLite）并尝试长期记忆入库。PDF 等文档走 ingest → Embedding → 用户隔离的 `RagVectorStore`；`/rag/ask` 是固定 RAG 链，并可走 Eval。
 
 ## ReAct 和 Chain-of-Thought（CoT）有什么区别？
 
@@ -257,23 +257,23 @@ CoT 让模型「一步步想」，输出仍是纯文本，无法接触外部世�
 
 ### 深入回答（2分钟版）
 
-CoT 只在 Prompt 里引导链式推理，模型不能改变环境。ReAct 在 `agent/loop.py` 实现完整循环：Planner 调 LLM 输出 Thought/Action，Executor 经 `tools/registry.py` 执行工具，Observation 追加到 messages 进入下一轮。Thought 是 CoT 的体现，但 ReAct 多了与 FAISS、计算器等真实系统的交互闭环，适合「先查文档再算数」这类多步任务。流式版在循环中推送 step / token，并支持取消。
+CoT 只在 Prompt 里引导链式推理，模型不能改变环境。ReAct 在 `agent/loop.py` 实现完整循环：Planner 调 LLM 输出 Thought/Action，Executor 经 `tools/registry.py` 执行工具，Observation 追加到 messages 进入下一轮。Thought 是 CoT 的体现，但 ReAct 多了与向量库、计算器等真实系统的交互闭环，适合「先查文档再算数」这类多步任务。流式版在循环中推送 step / token，并支持取消。
 
 ## 你的项目里 RAG 和 Agent 是什么关系？为什么要有两条入口？
 
 ### 简短回答（30秒版）
 
-RAG 解决「知识从哪来」，Agent 解决「怎么一步步完成任务」。本项目把检索封装成 `search_docs` 工具，Agent 自主决定何时查文档；同时提供 `/rag/ask` 固定 RAG 问答 API，不经过 ReAct。两条入口共用同一 FAISS 索引，但 Prompt 策略不同。
+RAG 解决「知识从哪来」，Agent 解决「怎么一步步完成任务」。本项目把检索封装成 `search_docs` 工具，Agent 自主决定何时查文档；同时提供 `/rag/ask` 固定 RAG 问答 API，不经过 ReAct。两条入口共用同一 Chroma 索引，但 Prompt 策略不同。
 
 ### 深入回答（2分钟版）
 
-Agent 路径下 LLM 在 ReAct 循环里自主选择是否调用 `search_docs`，检索结果作为 Observation 后由模型组织答案。`/rag/ask` 走 `rag/chain.py` 固定模板：embed → FAISS Top-K → 拼 Prompt → LLM，强制「仅根据资料回答」并返回 sources，还可挂 Eval。双入口是为兼顾灵活推理与可控文档 QA：前者适合开放域 + 计算器 + 多步决策，后者适合纯知识库问答、低延迟、可审计来源。
+Agent 路径下 LLM 在 ReAct 循环里自主选择是否调用 `search_docs`，检索结果作为 Observation 后由模型组织答案。`/rag/ask` 走 `rag/chain.py` 固定模板：embed → Chroma Top-K → 拼 Prompt → LLM，强制「仅根据资料回答」并返回 sources，还可挂 Eval。双入口是为兼顾灵活推理与可控文档 QA：前者适合开放域 + 计算器 + 多步决策，后者适合纯知识库问答、低延迟、可审计来源。
 
 ## Session / Agent / Long-term / Conversation 分别存什么？
 
 ### 简短回答（30秒版）
 
-Session：跨请求短期 user/assistant，SQLite 持久化、默认约 10 轮 FIFO。AgentMemory：单次 ReAct 全量 messages + trace，请求结束销毁。Long-term：跨会话抽取的事实偏好，FAISS。Conversation：另一套 SQLite，给 UI 完整历史（含 steps meta），刷新可恢复。
+Session：跨请求短期 user/assistant，SQLite 持久化、默认约 10 轮 FIFO。AgentMemory：单次 ReAct 全量 messages + trace，请求结束销毁。Long-term：跨会话抽取的事实偏好，Chroma。Conversation：另一套 SQLite，给 UI 完整历史（含 steps meta），刷新可恢复。
 
 ### 深入回答（2分钟版）
 
@@ -287,7 +287,7 @@ Session：跨请求短期 user/assistant，SQLite 持久化、默认约 10 轮 F
 
 ### 深入回答（2分钟版）
 
-配置集中在 `core/config.py` 的 Settings。换提供商时改环境变量即可，业务代码经 `chat_completion` / stream 和 embedder 统一出口。注意 Embedding 维度变化需重建 FAISS（文档库与记忆库都可能受影响）；若 tool calling 格式有差异，改动点收敛在 `core/llm.py` 和 `agent/parser.py`，ReAct 循环与各 Store 无需重构。
+配置集中在 `core/config.py` 的 Settings。换提供商时改环境变量即可，业务代码经 `chat_completion` / stream 和 embedder 统一出口。注意 Embedding 维度变化需重建向量索引（文档库与记忆库都可能受影响）；若 tool calling 格式有差异，改动点收敛在 `core/llm.py` 和 `agent/parser.py`，ReAct 循环与各 Store 无需重构。
 
 ## 为什么 Tool Calling 要单独做成 registry，而不是写在 Agent 循环里？
 
@@ -297,27 +297,27 @@ Session：跨请求短期 user/assistant，SQLite 持久化、默认约 10 轮 F
 
 ### 深入回答（2分钟版）
 
-registry 把工具定义（OpenAI function schema）与执行逻辑（handler）解耦。`agent/loop.py` 只调用 `execute_tool(name, args)`，Planner 用 `get_tool_schemas()` 注入 LLM。加 weather 工具只需：写 handler、写 schema、`registry.py` 注册——不改 ReAct 循环。这也便于测试：可 mock registry 单独测 Agent 逻辑，或单独测 search_docs 与 FAISS 的集成。
+registry 把工具定义（OpenAI function schema）与执行逻辑（handler）解耦。`agent/loop.py` 只调用 `execute_tool(name, args)`，Planner 用 `get_tool_schemas()` 注入 LLM。加 weather 工具只需：写 handler、写 schema、`registry.py` 注册——不改 ReAct 循环。这也便于测试：可 mock registry 单独测 Agent 逻辑，或单独测 search_docs 与 Chroma 的集成。
 
 ## 上传文档后，向量和原文分别存在哪里？
 
 ### 简短回答（30秒版）
 
-向量存在用户对应的 FAISS 索引（`rag_store_path` 下由 FaissVectorStore 管理）。chunk 原文、来源、页码等元数据在配套 metadata。检索时 FAISS 返回 ID，再查 metadata 取文本拼进 Prompt。
+向量存在用户对应的 Chroma 目录（`rag_store_path/{user_id}`，由 `RagVectorStore` 管理）。向量与 chunk 原文、来源、页码等 metadata 同库存储；检索时一并返回文本拼进 Prompt。
 
 ### 深入回答（2分钟版）
 
-上传走 `POST /documents/upload` → `file_parser` 解析 → chunk → `embedder` → `FaissVectorStore.add_embeddings()` 并 `save()`，且与 `user_id` 隔离。FAISS 存向量做相似度；原文在 metadata。Agent 的 `search_docs` 和 `/rag/ask` 共用同一套存储，保证入库一次、双入口一致。
+上传走 `POST /documents/upload` → `file_parser` 解析 → chunk → `embedder` → `RagVectorStore.add_embeddings()` 并 `save()`，且与 `user_id` 隔离。Chroma 存向量做相似度检索，原文与 metadata 同库。Agent 的 `search_docs` 和 `/rag/ask` 共用同一套存储，保证入库一次、双入口一致。
 
 ## 前端刷新页面后，对话历史还在吗？为什么？
 
 ### 简短回答（30秒版）
 
-对话文本通常还在：前端保留 conversation/session id；`ConversationStore` 拉回气泡与 steps meta，`SessionStore`（同为 SQLite）仍可给 Agent 注入近期 history。长期记忆在独立 FAISS。跨用户访问 403。
+对话文本通常还在：前端保留 conversation/session id；`ConversationStore` 拉回气泡与 steps meta，`SessionStore`（同为 SQLite）仍可给 Agent 注入近期 history。长期记忆在独立 Chroma。跨用户访问 403。
 
 ### 深入回答（2分钟版）
 
-`ConversationSidebar` 调 `/conversations`；ChatBox 可 `restoreMessages`。Session 与 Conversation 都落盘，但职责不同（Prompt vs UI）。短板在多副本：两套 SQLite + 本地 FAISS 不适合水平扩展，生产可迁共享 DB / Redis / 向量库。
+`ConversationSidebar` 调 `/conversations`；ChatBox 可 `restoreMessages`。Session 与 Conversation 都落盘，但职责不同（Prompt vs UI）。短板在多副本：两套 SQLite + 本地 Chroma 不适合水平扩展，生产可迁共享 DB / Redis / 向量库。
 
 ## 你的 Agent 最多跑几轮？超过会怎样？
 
@@ -357,13 +357,13 @@ ReAct 循环在 `agent/loop.py` 用步数上限约束。每轮 Planner 调 LLM�
 
 ### 深入回答（2分钟版）
 
-`/chat` 走 ReAct + Session + 可选长期记忆 + search_docs / calculator。`/rag/ask` 走固定链，Session 仅多轮上下文，不做 tool 决策，适合知识库门户与合规引用。共用用户隔离的 FaissVectorStore，文档入库一次即可。
+`/chat` 走 ReAct + Session + 可选长期记忆 + search_docs / calculator。`/rag/ask` 走固定链，Session 仅多轮上下文，不做 tool 决策，适合知识库门户与合规引用。共用用户隔离的 RagVectorStore，文档入库一次即可。
 
 ## 生产环境部署时，当前架构还有哪些短板？
 
 ### 简短回答（30秒版）
 
-Session/Conversation 已是 SQLite，但仍是单机文件；本地 FAISS 不利于多副本；默认 CORS/`auth_disabled` 不适合公网裸奔；缺系统级 rate limit 与完整可观测性。鉴权、持久化、流式、Eval 已比早期 MVP 进一步，但仍偏 Demo/实习项目量级。
+Session/Conversation 已是 SQLite，但仍是单机文件；本地 Chroma 不利于多副本；默认 CORS/`auth_disabled` 不适合公网裸奔；缺系统级 rate limit 与完整可观测性。鉴权、持久化、流式、Eval 已比早期 MVP 进一步，但仍偏 Demo/实习项目量级。
 
 ### 深入回答（2分钟版）
 

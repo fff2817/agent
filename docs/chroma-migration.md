@@ -48,8 +48,8 @@
 | 文件 | 原因 |
 |------|------|
 | `backend/tests/test_multi_user.py` | 持久化断言改为 `chroma.sqlite3`；增加 store 缓存清理，避免跨测污染 |
-| `backend/scripts/demos/demo_faiss.py` | 去掉 `import faiss`，演示 Chroma 增删查与持久化（文件名保留以免破坏旧入口习惯） |
-| `backend/scripts/demos/demo_rag.py` | 同上，mock 向量改用 numpy L2 归一化 |
+| `backend/scripts/demos/demo_chroma.py` | 演示 Chroma 增删查与持久化 |
+| `backend/scripts/demos/demo_rag.py` | mock 向量改用 numpy L2 归一化 |
 
 ### 文档
 
@@ -62,10 +62,10 @@
 
 | 范围 | 原因 |
 |------|------|
-| `backend/api/*.py` 路由与请求/响应模型 | 接口契约不变；仅日志/注释里可能仍写「FAISS」字样，不影响行为 |
+| `backend/api/*.py` 路由与请求/响应模型 | 接口契约不变 |
 | `backend/models/schemas.py` 中的 `faiss_id` | 对外 JSON 字段名保持稳定，避免前端 / Eval 破坏 |
 | `backend/eval/*` | 继续读写 `faiss_id` |
-| `docs/faiss.md` 等历史学习文档 | 保留作对照；以本文与当前代码为准 |
+| `FaissVectorStore` 别名 | `FaissVectorStore = RagVectorStore`，兼容旧 import |
 
 上层业务（`lc/rag/*`、`lc/memory/*`、`lc/tools/search_docs.py`）**无需改调用签名**，因为仍依赖 `get_rag_vector_store` / `get_memory_vector_store` 与相同方法名。
 
@@ -98,7 +98,7 @@ python -m pytest tests/ -q
 
 - `tests/test_multi_user.py` — 每用户 Chroma 目录隔离与持久化
 - `tests/test_rag_router.py` — 路由 + 向量过滤检索
-- 手工：`python -m scripts.demos.demo_faiss --mock`
+- 手工：`python -m scripts.demos.demo_chroma --mock`
 
 ## 使用注意
 

@@ -5,7 +5,7 @@ Long-term Memory 检索演示 — 展示完整 5 步数据流。
     cd backend
     python -m memory.demo_retrieval
 
-Step 1~4 可用本地 FAISS 演示；Step 5 需 OPENAI_API_KEY。
+Step 1~4 可用本地 Chroma 演示；Step 5 需 OPENAI_API_KEY。
 """
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ def demo_retrieval_flow() -> None:
                 continue
 
             print(f"Step 2 Embedding: 完成 (维度索引={store.count} 条)")
-            print(f"Step 3 FAISS Top-K: 命中 {len(result.memories)} 条")
+            print(f"Step 3 Chroma Top-K: 命中 {len(result.memories)} 条")
             for m in result.memories:
                 print(
                     f"       #{m.rank} score={m.score:.4f} "

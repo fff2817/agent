@@ -199,7 +199,7 @@ def create_sse_response(producer, *, http_request, should_cancel, initial_events
 
 **API 层职责（以 chat 为例）：**
 
-1. 加载 Session 短期记忆 + FAISS 长期记忆
+1. 加载 Session 短期记忆 + Chroma 长期记忆
 2. 推送 `context` 事件（initial_events）
 3. 运行 producer，在 `done` / `cancelled` 时写入 Session
 4. 返回 `StreamingResponse`

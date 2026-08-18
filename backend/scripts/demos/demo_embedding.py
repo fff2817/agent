@@ -119,7 +119,7 @@ def main() -> None:
         demo_chunks()
 
         _banner("完成")
-        print("  下一步: 把 EmbeddedChunk 存入 Chroma/FAISS，用户提问时检索相似向量\n")
+        print("  下一步: 把 EmbeddedChunk 存入 Chroma，用户提问时检索相似向量\n")
 
     except ValueError as exc:
         print(f"\n  错误: {exc}", file=sys.stderr)

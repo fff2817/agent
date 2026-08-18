@@ -6,7 +6,7 @@ Long-term Memory 向量库 — 基于 LangChain Chroma，与 RAG 索引物理分
     · Long-term 存用户记忆，按 user_id 隔离目录，metadata 含 memory_type
     · 混用会导致检索污染、权限混乱
 
-对外 API 与旧 FAISS MemoryVectorStore 对齐，上层 memory 链无需改接口。
+对外 API 与旧 Chroma MemoryVectorStore 对齐，上层 memory 链无需改接口。
 """
 
 from __future__ import annotations
@@ -136,7 +136,7 @@ class MemoryVectorStore:
         追加一条记忆向量（增量写入，自动持久化）。
 
         返回:
-            内部 seq_id（兼容旧 FAISS ID 语义）
+            内部 seq_id（兼容旧 Chroma ID 语义）
         """
         if not embedding:
             raise ValueError("embedding 不能为空")

@@ -11,7 +11,7 @@ import pytest
 from infra.catalog import DocumentCatalog, DocumentRecord
 from lc.rag.router import route_documents
 from lc.rag.types import EmbeddedChunk, TextChunk
-from infra.rag_vectorstore import FaissVectorStore
+from infra.rag_vectorstore import RagVectorStore
 
 
 @pytest.fixture
@@ -56,18 +56,18 @@ def _make_record(
     )
 
 
-def test_route_selects_faiss_notes(temp_rag_env, monkeypatch):
+def test_route_selects_chroma_notes(temp_rag_env, monkeypatch):
     user_id = "user-route"
     catalog = DocumentCatalog(user_id, store_dir=temp_rag_env / user_id)
 
-    vec_faiss = [1.0, 0.0, 0.0]
+    vec_chroma = [1.0, 0.0, 0.0]
     vec_req = [0.0, 1.0, 0.0]
     record_notes = _make_record(
         user_id,
         "AI笔记.md",
-        topics=["FAISS", "向量检索"],
-        keywords=["faiss", "embedding"],
-        embedding=vec_faiss,
+        topics=["Chroma", "向量检索"],
+        keywords=["chroma", "embedding"],
+        embedding=vec_chroma,
         doc_type="notes",
     )
     record_req = _make_record(
@@ -84,15 +84,15 @@ def test_route_selects_faiss_notes(temp_rag_env, monkeypatch):
     }
 
     def fake_embed(text: str) -> list[float]:
-        if "FAISS" in text or "faiss" in text.lower():
-            return vec_faiss
+        if "Chroma" in text or "chroma" in text.lower():
+            return vec_chroma
         if "需求" in text:
             return vec_req
         return [0.5, 0.5, 0.0]
 
     monkeypatch.setattr("lc.rag.router.embed_text", fake_embed)
 
-    result = route_documents("讲一下FAISS", user_id=user_id, catalog=catalog)
+    result = route_documents("讲一下Chroma", user_id=user_id, catalog=catalog)
     assert record_notes.doc_id in result.selected_doc_ids
     assert not result.fallback_all
 
@@ -123,14 +123,14 @@ def test_route_explicit_filename(temp_rag_env):
 
 
 def test_vectorstore_doc_id_filter(temp_rag_env):
-    store = FaissVectorStore(store_dir=temp_rag_env / "filter-user")
+    store = RagVectorStore(store_dir=temp_rag_env / "filter-user")
     dim = 4
     doc_a = "doc-a-id"
     doc_b = "doc-b-id"
 
     for i, (doc_id, text) in enumerate(
         [
-            (doc_a, "FAISS 向量检索教程"),
+            (doc_a, "Chroma 向量检索教程"),
             (doc_b, "项目需求文档内容"),
         ]
     ):
@@ -157,4 +157,4 @@ def test_vectorstore_doc_id_filter(temp_rag_env):
     hits = store.search(query, top_k=1, doc_ids=[doc_a])
     assert len(hits) == 1
     assert hits[0].chunk.doc_id == doc_a
-    assert "FAISS" in hits[0].chunk.text
+    assert "Chroma" in hits[0].chunk.text

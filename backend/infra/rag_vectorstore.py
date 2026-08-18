@@ -6,12 +6,12 @@ RAG 向量索引 — 基于 LangChain Chroma，持久化 Embedding 并做 Simila
     Chroma 是开源的嵌入式向量数据库：向量与 metadata 同库存储，支持磁盘持久化、
     增量写入，以及按 metadata 过滤。
 
-    本模块对外 API 与旧 FAISS 封装对齐（add_embeddings / search / save / load），
+    本模块对外 API 与旧 Chroma 封装对齐（add_embeddings / search / save / load），
     上层 RAG / Agent / 文档 API 无需改接口。
 
     相似度:
         collection 使用 hnsw:space=cosine；入库与查询前做 L2 归一化。
-        返回 score = 1 - distance（越高越相似，语义对齐原 FAISS 内积分数）。
+        返回 score = 1 - distance（越高越相似，语义对齐原 Chroma 内积分数）。
 """
 
 from __future__ import annotations
@@ -248,7 +248,7 @@ class RagVectorStore:
                 if chunk_doc_id not in doc_filter:
                     continue
 
-            # cosine distance → 与旧 FAISS 内积分数同向（越高越相似）
+            # cosine distance → 与旧 Chroma 内积分数同向（越高越相似）
             score = 1.0 - float(distance)
             chunk_id_raw = meta.get("chunk_id", 0)
             try:
@@ -374,7 +374,7 @@ class RagVectorStore:
         return len(to_delete)
 
 
-# 兼容旧类名（导入方仍可使用 FaissVectorStore）
+# 兼容旧类名（历史 import 仍可使用）
 FaissVectorStore = RagVectorStore
 
 _stores: dict[str, RagVectorStore] = {}

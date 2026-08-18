@@ -4,7 +4,7 @@ Long-term Memory 入库流水线。
     用户消息 + 助手回复
         ↓  extractor（筛选）
         ↓  embed_text（向量化，复用 rag/embedder）
-        ↓  MemoryVectorStore（FAISS 持久化）
+        ↓  MemoryVectorStore（Chroma 持久化）
 
 为什么放在独立 ingester 而不是 longterm_store?
     · extractor / embedder / vectorstore 各管一层，职责清晰
@@ -84,7 +84,7 @@ def ingest_turn(
         logger.warning("[Ingester] Embedding 失败，跳过入库: %s", exc)
         return ExtractionResult(False, reason=f"embed_failed:{exc}", score=result.score)
 
-    logger.info("[Ingester] Step 3 — 写入 FAISS")
+    logger.info("[Ingester] Step 3 — 写入 Chroma")
     vector_store.add_memory(
         record,
         embedding,

@@ -10,7 +10,7 @@
 |------|----------|----------|--------|
 | **Session Memory（短期会话记忆）** | `backend/memory/session_store.py` | 跨多次 HTTP 请求（SQLite 持久化） | 干净的 user + assistant 对话，供 Agent/RAG 注入 |
 | **Agent Memory（工作记忆）** | `backend/agent/memory.py` | 单次 `/chat` 请求内 | 完整 messages + ReAct trace |
-| **Long-term Memory（长期记忆）** | `backend/memory/longterm_store.py` 等 | 跨会话（FAISS 持久化） | 经 extractor 筛选的语义事实，向量检索后注入 Prompt |
+| **Long-term Memory（长期记忆）** | `backend/memory/longterm_store.py` 等 | 跨会话（Chroma 持久化） | 经 extractor 筛选的语义事实，向量检索后注入 Prompt |
 | **Conversation Store（UI 对话持久化）** | `backend/conversation/store.py` | 跨请求/刷新（SQLite） | 完整消息列表、标题、assistant meta（steps、memories） |
 
 Session 解决「本轮 Agent 需要最近几轮 history」；Long-term 解决「上周说过的重要偏好/事实」；Conversation 解决「侧边栏列表和刷新后恢复聊天气泡」；Agent Memory 解决「这一轮 ReAct 调了哪些工具」。
@@ -112,7 +112,7 @@ class AgentMemory:
 
 ```python
 class LongTermStore:
-    def retrieve(self, user_id, query) -> MemoryRetrievalResult  # FAISS Top-K + hints
+    def retrieve(self, user_id, query) -> MemoryRetrievalResult  # Chroma Top-K + hints
     def save_turn(self, user_message, assistant_message, *, user_id, session_id) -> ExtractionResult
     def search(self, user_id, query) -> list[str]  # 兼容简写
 ```
@@ -122,14 +122,14 @@ class LongTermStore:
 | 阶段 | 模块 | 说明 |
 |------|------|------|
 | 检索 | `memory/chain.py` | `should_retrieve_memory` → embed → `MemoryVectorStore.search` → hints |
-| 入库 | `memory/ingester.py` | `extractor` 打分 → embed → FAISS 写入 |
+| 入库 | `memory/ingester.py` | `extractor` 打分 → embed → Chroma 写入 |
 | 存储路径 | `settings.memory_store_path` | 默认 `memory/store/{user_id}/`，与 RAG 分离 |
 | HTTP | `api/chat.py` | 请求前 `_retrieve_longterm_memory`，请求后 `_save_longterm_memory` |
 | HTTP | `api/memory.py` | `GET /memory` 概览；`/memory/ask` 独立问答链路 |
 
 配置项（`core/config.py`）：`memory_top_k`、`memory_min_score`（入库阈值）、`memory_dedup_threshold`（语义去重）、`memory_min_retrieval_score`（注入阈值）。
 
-**不是占位**：`retrieve` 返回真实 Top-K；`save_turn` 经 extractor 筛选后写入 FAISS。
+**不是占位**：`retrieve` 返回真实 Top-K；`save_turn` 经 extractor 筛选后写入 Chroma。
 
 ## 4. Conversation Store（UI 持久化）
 
@@ -152,7 +152,7 @@ class LongTermStore:
 - 流式：`chatStreamAPI` + AbortSignal 停止生成
 - Memory 面板：`fetchMemoryOverview(sessionId)` → `GET /memory`
 
-刷新页面：**Vue 组件 state 会清空**，但可从 Conversation API 拉完整 history；Session/LongTerm 在后端 SQLite/FAISS 中仍在。
+刷新页面：**Vue 组件 state 会清空**，但可从 Conversation API 拉完整 history；Session/LongTerm 在后端 SQLite/Chroma 中仍在。
 
 # 数据流
 
@@ -249,7 +249,7 @@ SessionStore：`/chat`、`/rag/ask`、`/memory/ask` 共用，`add_turn` 只写�
 
 ### 深入回答（2分钟版）
 
-若 Session 存每步 tool 消息，history 膨胀且可能把过时 Observation 带入新任务。设计选择：Session 是「用户可见对话」的压缩表示；ReAct 细节在 AgentMemory trace、Conversation assistant meta 和日志。Vue Execution Viewer 读 steps/meta 而非 replay Session。长期记忆若需要 tool 结论，应经 extractor 摘要进 FAISS，而非 raw tool dump。
+若 Session 存每步 tool 消息，history 膨胀且可能把过时 Observation 带入新任务。设计选择：Session 是「用户可见对话」的压缩表示；ReAct 细节在 AgentMemory trace、Conversation assistant meta 和日志。Vue Execution Viewer 读 steps/meta 而非 replay Session。长期记忆若需要 tool 结论，应经 extractor 摘要进 Chroma，而非 raw tool dump。
 
 ## max_session_turns 设 10 合理吗？怎么定？
 
@@ -259,13 +259,13 @@ SessionStore：`/chat`、`/rag/ask`、`/memory/ask` 共用，`add_turn` 只写�
 
 ### 深入回答（2分钟版）
 
-`config.max_session_turns=10` 即最多 20 条 messages（user+assistant 交替）。`_trim` FIFO 删最早轮。定 10 是经验值：覆盖多数 follow-up，又不爆 context。Conversation 仍保留完整 UI 记录。调优：tiktoken 算总 token 超阈值再删；重要事实靠 longterm FAISS；不同产品轮数不同。
+`config.max_session_turns=10` 即最多 20 条 messages（user+assistant 交替）。`_trim` FIFO 删最早轮。定 10 是经验值：覆盖多数 follow-up，又不爆 context。Conversation 仍保留完整 UI 记录。调优：tiktoken 算总 token 超阈值再删；重要事实靠 longterm Chroma；不同产品轮数不同。
 
 ## 服务重启后用户对话还在吗？
 
 ### 简短回答（30秒版）
 
-Session 和 Conversation 都在 SQLite，重启后仍在。LongTerm 在 FAISS 磁盘也在。多实例部署时各副本 SQLite/FAISS 不自动同步才是问题。
+Session 和 Conversation 都在 SQLite，重启后仍在。LongTerm 在 Chroma 磁盘也在。多实例部署时各副本 SQLite/Chroma 不自动同步才是问题。
 
 ### 深入回答（2分钟版）
 
@@ -285,11 +285,11 @@ Vue 组件 state 会空，但 `ChatPage` 在 onMounted 用 session_id 调 `fetch
 
 ### 简短回答（30秒版）
 
-已实现。`LongTermStore.retrieve/save_turn` 走 FAISS：`chain.py` 检索 Top-K hints 注入 Agent；`ingester.py` + `extractor` 筛选后入库。`/chat` 和 `/memory/ask` 都已 wired。
+已实现。`LongTermStore.retrieve/save_turn` 走 Chroma：`chain.py` 检索 Top-K hints 注入 Agent；`ingester.py` + `extractor` 筛选后入库。`/chat` 和 `/memory/ask` 都已 wired。
 
 ### 深入回答（2分钟版）
 
-存储：`memory/store/{user_id}/` 独立 FAISS，与 RAG 分离。检索：`should_retrieve_memory` 判断 → embed query → Top-K → 加权过滤 → hints 字符串列表。入库：每轮 chat 后 `save_turn`，extractor 启发式打分 + 语义去重，达标才 embed 写入。配置：`memory_top_k`、`memory_min_score`、`memory_dedup_threshold`。API 返回 `retrieved_memories` 和 `memories_used` 便于前端展示。**不要说「未实现长期记忆」**。
+存储：`memory/store/{user_id}/` 独立 Chroma，与 RAG 分离。检索：`should_retrieve_memory` 判断 → embed query → Top-K → 加权过滤 → hints 字符串列表。入库：每轮 chat 后 `save_turn`，extractor 启发式打分 + 语义去重，达标才 embed 写入。配置：`memory_top_k`、`memory_min_score`、`memory_dedup_threshold`。API 返回 `retrieved_memories` 和 `memories_used` 便于前端展示。**不要说「未实现长期记忆」**。
 
 ## FIFO 截断会丢失什么？有什么更好的策略？
 
@@ -319,7 +319,7 @@ FIFO 简单但粗暴，如第 1 轮「请用正式语气」在第 11 轮 Session
 
 ### 深入回答（2分钟版）
 
-JWT / API Key / 开发模式 X-User-Id 确定身份。`get_or_create(session_id, user_id)` 若 session 存在但 owner 不同则 `SessionForbiddenError`。Conversation `get_owned` 同理。Memory/RAG FAISS 路径含 user_id。不能仅靠 UUID 随机性——必须绑定 user_id。生产还需 HTTPS、rate limit、审计日志；默认 `auth_disabled=True` 仅适合本地。
+JWT / API Key / 开发模式 X-User-Id 确定身份。`get_or_create(session_id, user_id)` 若 session 存在但 owner 不同则 `SessionForbiddenError`。Conversation `get_owned` 同理。Memory/RAG Chroma 路径含 user_id。不能仅靠 UUID 随机性——必须绑定 user_id。生产还需 HTTPS、rate limit、审计日志；默认 `auth_disabled=True` 仅适合本地。
 
 ## Agent trace 应该持久化吗？
 
@@ -339,7 +339,7 @@ Session FIFO 限轮数、LongTerm 只注入 Top-K 相关 hints、RAG Top-K 限�
 
 ### 深入回答（2分钟版）
 
-多层策略：Session `_trim` 限 10 轮；retrieve 有 `memory_min_retrieval_score` 过滤低分记忆；RAG `retrieval_top_k` 限 chunk；Agent `max_agent_steps` 限 tool 轮数。进一步：tiktoken 监控总 prompt token；extractor 只存高价值 facts 进 FAISS；system prompt 精简。glm-4 等长窗口是兜底，不是替代 memory 管理。
+多层策略：Session `_trim` 限 10 轮；retrieve 有 `memory_min_retrieval_score` 过滤低分记忆；RAG `retrieval_top_k` 限 chunk；Agent `max_agent_steps` 限 tool 轮数。进一步：tiktoken 监控总 prompt token；extractor 只存高价值 facts 进 Chroma；system prompt 精简。glm-4 等长窗口是兜底，不是替代 memory 管理。
 
 ## 停止生成时记忆会怎么保存？
 
@@ -354,10 +354,10 @@ Session FIFO 限轮数、LongTerm 只注入 Top-K 相关 hints、RAG Top-K 限�
 # 容易踩坑的问题
 
 1. **以为 localStorage 存了对话内容**：只存 `session_id` 和 token，messages 靠 Conversation API 或内存 state。
-2. **混淆四套存储**：Session（Agent 注入 FIFO）、Conversation（UI 全量）、LongTerm（FAISS  facts）、AgentMemory（单次 trace）。
+2. **混淆四套存储**：Session（Agent 注入 FIFO）、Conversation（UI 全量）、LongTerm（Chroma  facts）、AgentMemory（单次 trace）。
 3. **混淆 trace 和 history**：把 steps 当 history 喂回去会格式错乱。
 4. **Session 与 Agent 不同步**：Agent 内多轮 tool 不会写入 Session，只有最终 response 写入。
-5. **说长期记忆未实现**：代码已 wired retrieve/save_turn，面试应描述 FAISS + extractor 链路。
+5. **说长期记忆未实现**：代码已 wired retrieve/save_turn，面试应描述 Chroma + extractor 链路。
 6. **auth_disabled 下误以为无多用户**：仍有 `user_id` 隔离，应用 X-User-Id 测多租户。
 7. **FIFO 删掉的轮次**：UI 仍可在 Conversation 看到，但 Agent 下一轮不再注入。
 
@@ -365,7 +365,7 @@ Session FIFO 限轮数、LongTerm 只注入 Top-K 相关 hints、RAG Top-K 限�
 
 - **Conversation Summary Buffer**：LangChain 式自动摘要旧 Session turns
 - **MemGPT / 分层 memory**：主上下文 + 外部存储分页换入
-- **Zep / Mem0**：开源长期记忆框架；本项目是自研 extractor + FAISS
+- **Zep / Mem0**：开源长期记忆框架；本项目是自研 extractor + Chroma
 - **按 token 截断**：tiktoken 精确控 window
 - **Redis Session + TTL**：多副本场景替代本地 SQLite
 

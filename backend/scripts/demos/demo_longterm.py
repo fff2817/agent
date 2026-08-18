@@ -37,7 +37,7 @@ def demo_filter_only() -> None:
 
 
 def demo_full_pipeline() -> None:
-    print("=== Step 2~4: 筛选 → Embedding → FAISS → 检索 ===\n")
+    print("=== Step 2~4: 筛选 → Embedding → Chroma → 检索 ===\n")
 
     with tempfile.TemporaryDirectory() as tmp:
         store = MemoryVectorStore(store_dir=Path(tmp))
@@ -60,7 +60,7 @@ def demo_full_pipeline() -> None:
             label = "saved" if result.should_save else "skipped"
             print(f"[{label}] user={user!r} reason={result.reason}")
 
-        print(f"\nFAISS 索引条数: {store.count}\n")
+        print(f"\nChroma 索引条数: {store.count}\n")
 
         query = "你还记得我叫什么吗？"
         hits = retrieve_memories(query, user_id=user_id, store=store)

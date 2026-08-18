@@ -1,5 +1,5 @@
 """
-RAG 检索器 — 把「用户问题」变成向量，再从 FAISS 取 Top-K。
+RAG 检索器 — 把「用户问题」变成向量，再从 Chroma 取 Top-K。
 
 支持知识库路由：先选文档，再在选定文档的 chunk 中检索。
 """
@@ -11,14 +11,14 @@ from infra.catalog import get_document_catalog
 from lc.llm.embeddings import embed_text
 from lc.rag.router import RoutingResult, route_documents
 from lc.rag.types import SearchResult
-from infra.rag_vectorstore import FaissVectorStore, get_rag_vector_store
+from infra.rag_vectorstore import RagVectorStore, get_rag_vector_store
 
 logger = logging.getLogger(__name__)
 
 
 def search_similar(
     query: str,
-    store: FaissVectorStore | None = None,
+    store: RagVectorStore | None = None,
     top_k: int | None = None,
     *,
     doc_ids: list[str] | None = None,
@@ -31,14 +31,14 @@ def search_similar(
     """
     settings = get_settings()
     k = top_k or settings.retrieval_top_k
-    vector_store = store or FaissVectorStore()
+    vector_store = store or RagVectorStore()
 
     logger.info("[Retriever] 收到查询: %r", query[:100])
     logger.info("[Retriever] Step 1 — 问题向量化")
 
     query_vector = embed_text(query)
 
-    logger.info("[Retriever] Step 2 — FAISS Top-%d 检索", k)
+    logger.info("[Retriever] Step 2 — Chroma Top-%d 检索", k)
     results = vector_store.search(
         query_vector,
         top_k=k,
@@ -54,7 +54,7 @@ def search_with_routing(
     query: str,
     *,
     user_id: str,
-    store: FaissVectorStore | None = None,
+    store: RagVectorStore | None = None,
     top_k: int | None = None,
     doc_ids: list[str] | None = None,
     filenames: list[str] | None = None,

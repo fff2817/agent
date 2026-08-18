@@ -1,5 +1,5 @@
 """
-文档入库流水线 — 文本/PDF → Chunk → Embedding → FAISS + Catalog。
+文档入库流水线 — 文本/PDF → Chunk → Embedding → Chroma + Catalog。
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from lc.rag.doc_profile import (
 from lc.llm.embeddings import embed_chunks, embed_text
 from lc.rag.loader import load_pdf, load_text_file
 from lc.rag.types import ExtractedDocument, PageText
-from infra.rag_vectorstore import FaissVectorStore, get_rag_vector_store
+from infra.rag_vectorstore import RagVectorStore, get_rag_vector_store
 
 logger = logging.getLogger(__name__)
 
@@ -92,11 +92,11 @@ def ingest_text(
     source: str = "inline",
     *,
     user_id: str,
-    store: FaissVectorStore | None = None,
+    store: RagVectorStore | None = None,
     save: bool = True,
     doc_id: str | None = None,
 ) -> int:
-    """把纯文本入库: 切分 → 向量化 → 写入 FAISS。"""
+    """把纯文本入库: 切分 → 向量化 → 写入 Chroma。"""
     doc_id = doc_id or str(uuid.uuid4())
     logger.info("[Ingest] 开始入库文本: source=%s, doc_id=%s, 长度=%d", source, doc_id, len(text))
 
@@ -141,7 +141,7 @@ def ingest_pdf(
     pdf_path: str | Path,
     *,
     user_id: str,
-    store: FaissVectorStore | None = None,
+    store: RagVectorStore | None = None,
     save: bool = True,
     doc_id: str | None = None,
     storage_path: str | None = None,
@@ -165,7 +165,7 @@ def ingest_document(
     document: ExtractedDocument,
     *,
     user_id: str,
-    store: FaissVectorStore | None = None,
+    store: RagVectorStore | None = None,
     save: bool = True,
     doc_id: str | None = None,
     filename: str | None = None,
@@ -213,7 +213,7 @@ def ingest_text_file(
     text_path: str | Path,
     *,
     user_id: str,
-    store: FaissVectorStore | None = None,
+    store: RagVectorStore | None = None,
     save: bool = True,
 ) -> int:
     path = Path(text_path)
@@ -234,7 +234,7 @@ def ingest_file(
     file_path: str | Path,
     *,
     user_id: str,
-    store: FaissVectorStore | None = None,
+    store: RagVectorStore | None = None,
     save: bool = True,
 ) -> IngestResult:
     """通用文件入库：PDF 走逐页提取，其余格式走 file_parser。"""

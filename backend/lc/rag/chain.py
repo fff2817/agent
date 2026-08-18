@@ -7,7 +7,7 @@ RAG 完整链路 — 从用户问题到 LLM 回答。
         ↓  [Step 1] 接收问题
     Embedding（问题向量化）
         ↓  [Step 2] embed_text()
-    FAISS Search（相似度检索）
+    Chroma Search（相似度检索）
         ↓  [Step 3] vectorstore.search()
     Top-K Chunk（最相关的文档片段）
         ↓  [Step 4] SearchResult[]
@@ -27,7 +27,7 @@ from lc.rag.prompt_builder import build_rag_messages
 from lc.rag.retriever import search_with_routing
 from lc.rag.router import RoutingResult
 from lc.rag.types import SearchResult
-from infra.rag_vectorstore import FaissVectorStore, get_rag_vector_store
+from infra.rag_vectorstore import RagVectorStore, get_rag_vector_store
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ def rag_ask(
     question: str,
     *,
     user_id: str,
-    store: FaissVectorStore | None = None,
+    store: RagVectorStore | None = None,
     top_k: int | None = None,
     history: list[dict] | None = None,
 ) -> RAGResult:
@@ -66,7 +66,7 @@ def rag_ask(
 
     参数:
         question: 用户自然语言问题
-        store:    FAISS 向量库；None 则加载默认路径
+        store:    Chroma 向量库；None 则加载默认路径
         top_k:    检索条数
         history:  Session 历史 messages
 
@@ -132,7 +132,7 @@ def _prepare_rag_messages(
     question: str,
     *,
     user_id: str,
-    store: FaissVectorStore | None = None,
+    store: RagVectorStore | None = None,
     top_k: int | None = None,
     history: list[dict] | None = None,
 ) -> tuple[list[SearchResult], list[dict], str, RoutingResult]:
@@ -155,7 +155,7 @@ def _prepare_rag_messages(
         )
 
     logger.info("[RAG] Step 2 — Embedding: 问题向量化")
-    logger.info("[RAG] Step 3 — 文档路由 + FAISS Search")
+    logger.info("[RAG] Step 3 — 文档路由 + Chroma Search")
 
     sources, routing = search_with_routing(
         question,
@@ -190,7 +190,7 @@ def rag_ask_stream(
     question: str,
     *,
     user_id: str,
-    store: FaissVectorStore | None = None,
+    store: RagVectorStore | None = None,
     top_k: int | None = None,
     history: list[dict] | None = None,
     should_cancel: Callable[[], bool] | None = None,

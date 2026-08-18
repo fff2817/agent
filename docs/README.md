@@ -12,8 +12,8 @@
 | [tool-calling.md](./tool-calling.md) | `backend/tools/` | 工具注册与 Function Calling |
 | [react-agent.md](./react-agent.md) | `backend/agent/` | ReAct 循环：Thought → Action → Observation |
 | [rag.md](./rag.md) | `backend/rag/` | 检索增强生成完整流水线 |
-| [faiss.md](./faiss.md) | （历史）原 FAISS 说明 | 对照旧实现；现已迁 Chroma |
-| [chroma-migration.md](./chroma-migration.md) | `backend/infra/*_vectorstore.py` | **FAISS → Chroma 迁移说明** |
+| [chroma.md](./chroma.md) | `backend/infra/*_vectorstore.py` | Chroma 向量库与相似度检索 |
+| [chroma-migration.md](./chroma-migration.md) | 迁移说明 | **FAISS → Chroma 迁移记录** |
 | [memory.md](./memory.md) | `backend/memory/` + `backend/agent/memory.py` | Session / Agent / 长期记忆 |
 | [frontend.md](./frontend.md) | `frontend/` | Vue 3 聊天 UI、会话侧栏与执行可视化 |
 | [streaming.md](./streaming.md) | 流式全链路 | SSE 五层架构：LLM → Agent → API → 前端 |
@@ -36,13 +36,13 @@
 ```
 architecture → backend → llm → tool-calling → react-agent
                                     ↓
-              rag → chroma-migration → memory → frontend → streaming → stop-generation
+              rag → chroma → memory → frontend → streaming → stop-generation
 ```
 
 1. 先读 **architecture**，建立全局地图
 2. 再读 **backend + llm**，理解 HTTP 如何触达模型
 3. 然后 **tool-calling + react-agent**，这是 Agent 核心
-4. 接着 **rag + chroma-migration**，理解知识库如何增强回答（向量库现为 Chroma）
+4. 接着 **rag + chroma**，理解知识库如何增强回答（向量库为 Chroma）
 5. 最后 **memory + frontend**，理解多轮对话与 UI
 6. 读 **streaming**，理解 SSE 五层架构与打字机效果
 7. 需要讲清 **stop-generation**，理解 AbortController 取消链路

@@ -105,7 +105,7 @@ async def get_memory_overview(
 
         user_id → SessionStore（短期 turns）
 
-               → MemoryVectorStore（长期 FAISS metadata）
+               → MemoryVectorStore（长期 Chroma metadata）
 
     """
 
@@ -195,7 +195,7 @@ async def memory_ask_endpoint(
 
     数据流:
 
-        用户提问 → 是否检索 → FAISS Top-K → 拼 Prompt → LLM → 回答
+        用户提问 → 是否检索 → Chroma Top-K → 拼 Prompt → LLM → 回答
 
     """
 

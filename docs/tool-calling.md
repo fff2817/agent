@@ -72,10 +72,10 @@ _TOOL_REGISTRY: dict[str, dict] = {
 `backend/tools/search_docs.py`：
 
 - **用途**：把 RAG 检索包装成 Agent 可调用的 Action
-- **内部**：`FaissVectorStore` → `search_similar()` → `format_search_results()`
+- **内部**：`RagVectorStore` → `search_similar()` → `format_search_results()`
 - **Observation 格式**：`[1] 手册.pdf p.3 (score=0.82): 报销流程...`
 
-这是 **Agent + RAG 的桥梁**：Agent 不需要懂 FAISS，只需调 `search_docs`。
+这是 **Agent + RAG 的桥梁**：Agent 不需要懂 Chroma，只需调 `search_docs`。
 
 ## 执行链路
 
@@ -109,7 +109,7 @@ flowchart LR
     EX -->|name + args| REG[Registry]
     REG --> CALC[calculator]
     REG --> SDOC[search_docs]
-    SDOC --> FAISS[FaissVectorStore]
+    SDOC --> Chroma[RagVectorStore]
     CALC --> OBS[Observation string]
     SDOC --> OBS
     OBS --> MEM[AgentMemory messages]
@@ -144,7 +144,7 @@ OpenAI 风格 Function Calling：请求带 `tools` schema，模型返回 `tool_c
 
 ### 简短回答（30秒版）
 
-两个工具：`calculator` 做安全算术，避免 LLM 算错；`search_docs` 从 FAISS 知识库检索文档片段，把 RAG 能力包装成 Agent 可调用的 Action。
+两个工具：`calculator` 做安全算术，避免 LLM 算错；`search_docs` 从 Chroma 知识库检索文档片段，把 RAG 能力包装成 Agent 可调用的 Action。
 
 ### 深入回答（2分钟版）
 
@@ -198,7 +198,7 @@ OpenAI 支持一条 message 多个 tool_calls。我们 Prompt 要求「每次只
 
 ### 深入回答（2分钟版）
 
-`search_docs` 在 `tools/search_docs.py`：FaissVectorStore → Top-K → 格式化为 Observation 文本，Agent 下一轮自己总结。`rag_ask` 在 `rag/chain.py`：检索后 `build_rag_messages()` 强制「仅据资料」并一次 chat_completion。Agent 路径可组合 calculator；RAG API 返回结构化 sources。共用同一 FAISS，Prompt 策略不同。
+`search_docs` 在 `tools/search_docs.py`：RagVectorStore → Top-K → 格式化为 Observation 文本，Agent 下一轮自己总结。`rag_ask` 在 `rag/chain.py`：检索后 `build_rag_messages()` 强制「仅据资料」并一次 chat_completion。Agent 路径可组合 calculator；RAG API 返回结构化 sources。共用同一 Chroma，Prompt 策略不同。
 
 ## 工具返回 Error 字符串时 Agent 会怎样？
 
@@ -248,7 +248,7 @@ I/O 型工具（HTTP、DB）应该 async。我们 MVP 全同步，简单能跑�
 
 ### 深入回答（2分钟版）
 
-当前 `execute()` → `registry.execute_tool()` 同步阻塞。search_docs 内含 Embedding API + FAISS，耗时可观；多用户时阻塞 worker。改进：`async def execute_tool` + httpx async；FastAPI 路由 await；CPU 型 calculator 仍快。长时间工具应改「提交任务 + 轮询」模式，Agent 循环支持 deferred Observation。
+当前 `execute()` → `registry.execute_tool()` 同步阻塞。search_docs 内含 Embedding API + Chroma，耗时可观；多用户时阻塞 worker。改进：`async def execute_tool` + httpx async；FastAPI 路由 await；CPU 型 calculator 仍快。长时间工具应改「提交任务 + 轮询」模式，Agent 循环支持 deferred Observation。
 
 # 容易踩坑的问题
 

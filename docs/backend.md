@@ -37,7 +37,7 @@ FastAPI 是基于 Python 类型注解的现代 Web 框架，特点：
 | `/conversations/{id}` | PATCH | 重命名对话 |
 | `/conversations/{id}` | DELETE | 删除对话 |
 | `/documents` | GET | 列出当前用户已上传文档 |
-| `/documents/upload` | POST | 多格式文档上传并入库 FAISS |
+| `/documents/upload` | POST | 多格式文档上传并入库 Chroma |
 | `/documents/delete` | POST | 删除文档及对应向量 |
 | `/rag/ask` | POST | 独立 RAG 文档问答（可选评估） |
 | `/rag/ask/stream` | POST | 流式 RAG 问答（SSE） |
@@ -116,7 +116,7 @@ async def health(): ...
 2. `_resolve_chat_id` — `conversation_id` 与 `session_id` 共用同一 UUID
 3. `SessionStore.get_or_create(session_id, user_id)` — 加载短期历史，校验归属
 4. `ConversationStore.ensure_conversation` — 确保 UI 持久化记录存在
-5. `_retrieve_longterm_memory` — `LongTermStore.retrieve` → FAISS Top-K hints
+5. `_retrieve_longterm_memory` — `LongTermStore.retrieve` → Chroma Top-K hints
 6. `run_react_agent(..., memory_hints=...)` 或 `run_react_agent_stream`
 7. `SessionStore.add_turn` + `_save_longterm_memory` + `_persist_conversation_turn`
 8. 返回 `ChatResponse` 或 SSE 事件流
@@ -148,7 +148,7 @@ async def health(): ...
 
 - 支持 **PDF、DOCX、TXT、Markdown、图片**（`file_parser/parser.py` 统一解析，非 PDF-only）
 - 按用户隔离：`rag/store/{user_id}/uploads/`
-- 流程：保存文件 → `ingest_file()` → chunk → embed → FAISS + catalog
+- 流程：保存文件 → `ingest_file()` → chunk → embed → Chroma + catalog
 - 列表 / 删除：同步清理磁盘文件、catalog 与向量
 
 ## RAG API
@@ -163,7 +163,7 @@ async def health(): ...
 
 `backend/api/memory.py`：
 
-- `GET /memory`：短期 turns + 长期 FAISS metadata 概览
+- `GET /memory`：短期 turns + 长期 Chroma metadata 概览
 - `POST /memory/ask` / `/memory/ask/stream`：独立长期记忆问答链路（`memory/chain.py`）
 
 ## Eval API
@@ -211,7 +211,7 @@ LongTermStore.retrieve(user_id, message) → memory_hints
 agent.loop.run_react_agent(message, history, memory_hints, user_id)
     ↓
 SessionStore.add_turn
-LongTermStore.save_turn（extractor 筛选后写 FAISS）
+LongTermStore.save_turn（extractor 筛选后写 Chroma）
 ConversationStore.append_turn（含 steps / retrieved_memories meta）
     ↓
 ChatResponse JSON
@@ -235,7 +235,7 @@ multipart file（pdf/docx/txt/md/图片）
 保存 rag/store/{user_id}/uploads/
     ↓
 file_parser → rag.ingest.ingest_file
-    ↓ chunk → embed → FaissVectorStore.save + catalog
+    ↓ chunk → embed → RagVectorStore.save + catalog
     ↓
 DocumentUploadResponse
 ```
@@ -298,7 +298,7 @@ FastAPI 有类型注解 + Pydantic 自动校验，还能自动生成 OpenAPI 文
 
 ### 深入回答（2分钟版）
 
-`auth/router.py` 提供注册登录，JWT 由 `auth/jwt_utils.py` 签发，用户存 SQLite `users.db`。受保护路由 `Depends(get_current_user)`，优先级 JWT > API Key > 开发模式。`SessionStore.get_or_create` 和 `ConversationStore.get_owned` 校验 `user_id`，否则 403。RAG/Memory 向量库按用户分目录。已实现的是 **身份识别 + 资源归属**；生产短板：默认 `auth_disabled=True`、无 refresh token、无请求限流、本地 SQLite/FAISS 多副本不共享。
+`auth/router.py` 提供注册登录，JWT 由 `auth/jwt_utils.py` 签发，用户存 SQLite `users.db`。受保护路由 `Depends(get_current_user)`，优先级 JWT > API Key > 开发模式。`SessionStore.get_or_create` 和 `ConversationStore.get_owned` 校验 `user_id`，否则 403。RAG/Memory 向量库按用户分目录。已实现的是 **身份识别 + 资源归属**；生产短板：默认 `auth_disabled=True`、无 refresh token、无请求限流、本地 SQLite/Chroma 多副本不共享。
 
 ## CORS 是什么？本项目怎么配置的？
 
@@ -328,7 +328,7 @@ Session 供 Agent 注入最近 N 轮 history；LongTerm 跨会话向量检索 hi
 
 ### 深入回答（2分钟版）
 
-`session_id === conversation_id`。SessionStore（SQLite `sessions.db`）FIFO 保留 `max_session_turns` 轮，给 `run_react_agent` 拼 messages。LongTermStore 在请求前 `retrieve`、请求后 `save_turn`（extractor 筛选写 FAISS `memory/store`）。ConversationStore（SQLite `conversations.db`）append 每轮 user/assistant 及 assistant meta（steps、retrieved_memories），供侧边栏列表和刷新后 `GET /conversations/{id}` 恢复 Vue UI。Agent 工作记忆仍在单次请求内的 `AgentMemory`，不落 Session。
+`session_id === conversation_id`。SessionStore（SQLite `sessions.db`）FIFO 保留 `max_session_turns` 轮，给 `run_react_agent` 拼 messages。LongTermStore 在请求前 `retrieve`、请求后 `save_turn`（extractor 筛选写 Chroma `memory/store`）。ConversationStore（SQLite `conversations.db`）append 每轮 user/assistant 及 assistant meta（steps、retrieved_memories），供侧边栏列表和刷新后 `GET /conversations/{id}` 恢复 Vue UI。Agent 工作记忆仍在单次请求内的 `AgentMemory`，不落 Session。
 
 ## 流式聊天和停止生成怎么实现的？
 
@@ -344,11 +344,11 @@ Session 供 Agent 注入最近 N 轮 history；LongTerm 跨会话向量检索 hi
 
 ### 简短回答（30秒版）
 
-`file_parser` 统一解析 PDF/DOCX/TXT/MD/图片，再走同一套 chunk → embed → FAISS。图片走视觉模型 OCR/描述。按 `user_id` 隔离 uploads 和向量库。
+`file_parser` 统一解析 PDF/DOCX/TXT/MD/图片，再走同一套 chunk → embed → Chroma。图片走视觉模型 OCR/描述。按 `user_id` 隔离 uploads 和向量库。
 
 ### 深入回答（2分钟版）
 
-`api/documents.py` 用 `get_supported_extensions()` 校验后缀，拒绝路径穿越。`ingest_file` 根据类型选 parser（`pdf_parser`、`docx_parser`、`image_parser` 等），输出统一文本块后入库。图片可能需要 `openai_vision_model`。列表和删除 API 同步清理 catalog 与 FAISS chunks。前端 upload 用 XHR multipart，timeout 180s。这比早期只接 PDF 更贴近真实知识库场景。
+`api/documents.py` 用 `get_supported_extensions()` 校验后缀，拒绝路径穿越。`ingest_file` 根据类型选 parser（`pdf_parser`、`docx_parser`、`image_parser` 等），输出统一文本块后入库。图片可能需要 `openai_vision_model`。列表和删除 API 同步清理 catalog 与 Chroma chunks。前端 upload 用 XHR multipart，timeout 180s。这比早期只接 PDF 更贴近真实知识库场景。
 
 ## RAG 评估链路怎么接入的？
 
@@ -374,11 +374,11 @@ FastAPI 根据 Pydantic Schema 和路由装饰器生成 Swagger UI，访问 `htt
 
 ### 简短回答（30秒版）
 
-当前 `/health` 只返回 `{"status":"ok"}`，只能证明进程活着。生产还应检查 LLM 连通、FAISS 可读、磁盘空间，返回细粒度状态给 K8s 探针。
+当前 `/health` 只返回 `{"status":"ok"}`，只能证明进程活着。生产还应检查 LLM 连通、向量库可读、磁盘空间，返回细粒度状态给 K8s 探针。
 
 ### 深入回答（2分钟版）
 
-`main.py` 的 `/health` 是 liveness 最低配。生产建议：`/health/live` 仅进程存活；`/health/ready` 检查 OPENAI_API_KEY 已配、各用户 FaissVectorStore 能 load、SQLite 目录可写。返回 `{ status, llm, vector_store, disk }` 供 Kubernetes readinessProbe。LLM 检查可用轻量 ping 或缓存结果避免每次打 API。多实例部署时 SQLite/FAISS 本地文件需迁移到共享存储或对象存储。
+`main.py` 的 `/health` 是 liveness 最低配。生产建议：`/health/live` 仅进程存活；`/health/ready` 检查 OPENAI_API_KEY 已配、各用户 RagVectorStore 能 load、SQLite 目录可写。返回 `{ status, llm, vector_store, disk }` 供 Kubernetes readinessProbe。LLM 检查可用轻量 ping 或缓存结果避免每次打 API。多实例部署时 SQLite/Chroma 本地文件需迁移到共享存储或对象存储。
 
 # 容易踩坑的问题
 
@@ -389,14 +389,14 @@ FastAPI 根据 Pydantic Schema 和路由装饰器生成 Swagger UI，访问 `htt
 5. **大文件上传 timeout**：前端 upload 180s，超大 PDF/图片仍可能超时，需异步任务或分片。
 6. **Session 与 Conversation 混淆**：Session 只保留最近 N 轮给 Agent；完整 UI 历史看 Conversation API。
 7. **错误 detail 泄露**：生产环境不应把完整 stack trace 返回给前端。
-8. **多副本部署**：本地 SQLite + 每实例 FAISS 文件不自动同步，需架构升级。
+8. **多副本部署**：本地 SQLite + 每实例 Chroma 文件不自动同步，需架构升级。
 
 # 进阶知识
 
 - **依赖注入**：FastAPI `Depends(get_current_user)` 统一鉴权，测试可 override
 - **SSE vs WebSocket**：本项目聊天/RAG/Memory 流式均用 SSE + POST，实现简单、穿透代理友好
 - **BackgroundTasks**：大文档入库可异步化，上传立即返回 task_id
-- **gunicorn + uvicorn workers**：多进程部署时注意 SQLite 写锁与 FAISS 文件锁
+- **gunicorn + uvicorn workers**：多进程部署时注意 SQLite 写锁与 Chroma 文件锁
 - **API Gateway**：Kong/Nginx 统一鉴权、限流、TLS 终止
 
 **相关文档**：[architecture.md](./architecture.md) · [memory.md](./memory.md) · [react-agent.md](./react-agent.md) · [rag.md](./rag.md) · [frontend.md](./frontend.md)

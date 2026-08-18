@@ -188,7 +188,7 @@ async def rag_ingest_endpoint(
     request: RAGIngestRequest,
     user: UserContext = Depends(get_current_user),
 ) -> RAGIngestResponse:
-    """把文本内容入库（切分 + Embedding + FAISS）。"""
+    """把文本内容入库（切分 + Embedding + Chroma）。"""
     logger.info(
         "[API/RAG] 入库请求: user=%s source=%s, 长度=%d",
         user.user_id,

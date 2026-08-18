@@ -27,7 +27,7 @@ from lc.rag.chain import rag_ask
 from lc.rag.chunker import chunk_plain_text
 from lc.llm.embeddings import embed_chunks
 from lc.rag.types import EmbeddedChunk, TextChunk
-from infra.rag_vectorstore import FaissVectorStore
+from infra.rag_vectorstore import RagVectorStore
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
@@ -77,7 +77,7 @@ def _mock_embedded(chunks: list[TextChunk], dim: int = 128) -> list[EmbeddedChun
     return results
 
 
-def run_ingest(store_dir: str, use_mock: bool) -> FaissVectorStore:
+def run_ingest(store_dir: str, use_mock: bool) -> RagVectorStore:
     _banner("阶段 0 — 文档入库（离线准备）")
     print("""
   作用: 把文档切成 chunk → 向量化 → 存入 Chroma
@@ -87,7 +87,7 @@ def run_ingest(store_dir: str, use_mock: bool) -> FaissVectorStore:
     chunks = chunk_plain_text(SAMPLE_DOC, source="员工手册.txt", chunk_size=150, chunk_overlap=20)
     print(f"  切分得到 {len(chunks)} 个 chunk\n")
 
-    store = FaissVectorStore(store_dir=store_dir)
+    store = RagVectorStore(store_dir=store_dir)
     store.clear()
 
     if use_mock:
@@ -117,7 +117,7 @@ def run_ask(question: str, store_dir: str) -> None:
   └─────────────────────────────────────────────────────────┘
 """)
 
-    store = FaissVectorStore(store_dir=store_dir)
+    store = RagVectorStore(store_dir=store_dir)
 
     print(f'  问题: "{question}"\n')
     print("  --- 开始执行（详见 [RAG] 日志）---\n")
@@ -153,7 +153,7 @@ def main() -> None:
 
         if args.ask is not None or not args.ingest:
             # 若索引不存在，先入库
-            store = FaissVectorStore(store_dir=args.store)
+            store = RagVectorStore(store_dir=args.store)
             if store.count == 0:
                 print("  向量库为空，先执行入库...\n")
                 store = run_ingest(args.store, use_mock=args.mock)

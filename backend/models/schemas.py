@@ -108,7 +108,7 @@ class ChatResponse(BaseModel):
     )
     retrieved_memories: list[RetrievedMemorySchema] = Field(
         default_factory=list,
-        description="本轮 FAISS 检索命中的长期记忆详情",
+        description="本轮 Chroma 检索命中的长期记忆详情",
     )
     memory_retrieval_skipped: bool = Field(
         False,
@@ -139,7 +139,7 @@ class RAGSourceSchema(BaseModel):
 
 class RetrievalItemEvalSchema(BaseModel):
     rank: int
-    faiss_id: int
+    faiss_id: int = Field(..., description="内部向量序号（历史字段名，兼容 Eval）")
     vector_score: float
     relevance_score: float
     relevance_label: str

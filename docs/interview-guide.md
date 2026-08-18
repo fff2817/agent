@@ -10,7 +10,7 @@
 |------|-----------|
 | **开场** | 用 1 分钟项目介绍建立印象 |
 | **架构** | 画数据流、讲模块分工 |
-| **深挖** | 按 Tool Calling → ReAct → RAG → FAISS → Memory 顺序答 |
+| **深挖** | 按 Tool Calling → ReAct → RAG → Chroma → Memory 顺序答 |
 | **追问** | 用「容易追问」预判，用「继续展开」展示深度 |
 | **收尾** | 主动说 MVP 短板 + 改进方向，显得有工程思维 |
 
@@ -32,7 +32,7 @@
 
 ### 30 秒版（开场必背）
 
-> 这是一个 **React + FastAPI** 的全栈 AI 助手。用户能聊天、上传 PDF 建知识库。后端核心是 **ReAct Agent**：大模型先思考，再调工具——**计算器**做精确运算，**search_docs** 检索文档——看到结果后继续推理，直到给出最终答案。文档侧走 **RAG**：PDF 切块、Embedding、存 **FAISS**，检索后拼进 Prompt 减少幻觉。多轮对话靠 **Session 记忆** 保留最近 10 轮。
+> 这是一个 **React + FastAPI** 的全栈 AI 助手。用户能聊天、上传 PDF 建知识库。后端核心是 **ReAct Agent**：大模型先思考，再调工具——**计算器**做精确运算，**search_docs** 检索文档——看到结果后继续推理，直到给出最终答案。文档侧走 **RAG**：PDF 切块、Embedding、存 **Chroma**，检索后拼进 Prompt 减少幻觉。多轮对话靠 **Session 记忆** 保留最近 10 轮。
 
 ### 2 分钟版（项目亮点）
 
@@ -42,12 +42,12 @@
 - 前端：React 19 + Vite + Axios
 - 后端：FastAPI + Pydantic
 - 模型：OpenAI 兼容 API（默认智谱 GLM，`core/llm.py`）
-- 向量：FAISS + Embedding API
+- 向量：Chroma + Embedding API
 - Agent：自研 ReAct 循环（`backend/agent/`）
 
 **两条主链路：**
 1. **Agent 聊天**：`POST /chat` → Session 历史 → ReAct → 返回 `response` + `steps` trace
-2. **RAG**：上传 PDF → ingest → FAISS；问答走 `/rag/ask` 或 Agent 的 `search_docs` 工具
+2. **RAG**：上传 PDF → ingest → Chroma；问答走 `/rag/ask` 或 Agent 的 `search_docs` 工具
 
 **你的贡献（按实际改）：** 例如「我实现了 ReAct 循环和工具注册表」「我打通了 PDF 入库到 Agent 检索的全链路」。
 
@@ -64,7 +64,7 @@
 
 - **对比竞品：** 「ChatGPT 插件是工具调用；我这版是自研 ReAct + 可返回每步 trace，便于调试。」
 - **举例子：** 「用户问『手册里报销流程？』→ Agent 调 search_docs → 拿到 PDF 片段 → 组织 Final Answer。」
-- **主动收尾：** 「当前是 MVP，我知道 Session 内存存储、FAISS 规模、鉴权是生产短板，后续可以……」
+- **主动收尾：** 「当前是 MVP，我知道 Session 内存存储、向量库规模、鉴权是生产短板，后续可以……」
 - **深入阅读：** [architecture.md](./architecture.md)
 
 ---
@@ -83,7 +83,7 @@
 
 ### 30 秒版
 
-> 前端 React 调 FastAPI。API 层很薄：`/chat` 编排 Session + ReAct，`/documents/upload` 入库，`/rag/ask` 固定 RAG 问答。ReAct 调 `core/llm.py` 和 `tools/registry.py`；RAG 调 embedder + `FaissVectorStore`。LLM 层与 Agent 层分离，工具可插拔，RAG 与 Agent 共用同一向量库。
+> 前端 React 调 FastAPI。API 层很薄：`/chat` 编排 Session + ReAct，`/documents/upload` 入库，`/rag/ask` 固定 RAG 问答。ReAct 调 `core/llm.py` 和 `tools/registry.py`；RAG 调 embedder + `RagVectorStore`。LLM 层与 Agent 层分离，工具可插拔，RAG 与 Agent 共用同一向量库。
 
 ### 2 分钟版（建议边画边说）
 
@@ -96,14 +96,14 @@
          ↓                    ↓
     agent/loop          rag/chain + retriever
          ↓                    ↓
-    core/llm.py  ←——→  FaissVectorStore
+    core/llm.py  ←——→  RagVectorStore
          ↓
     tools/registry (calculator, search_docs)
 ```
 
 **`/chat` 路径：** `get_history_messages` → `run_react_agent` → `add_turn` → 返回 `ChatResponse(steps=...)`
 
-**上传路径：** PDF → `ingest_pdf` → chunk → embed → FAISS save
+**上传路径：** PDF → `ingest_pdf` → chunk → embed → Chroma save
 
 **设计原则：**
 1. LLM 只负责发请求，不负责 Agent 逻辑
@@ -118,12 +118,12 @@
 | 503 和 502？ | 503=ValueError 可预期错误；502=未捕获异常 |
 | 怎么加流式输出？ | 五层 SSE：`llm → planner/chain → loop → sse.py → fetch`；见 [streaming.md](./streaming.md) |
 | 停止生成怎么实现？ | AbortController + `is_disconnected()` + stream break；见 [stop-generation.md](./stop-generation.md) |
-| 生产短板？ | Session 内存、CORS `*`、无鉴权、IndexFlatIP 规模 |
+| 生产短板？ | 单机 SQLite、CORS/`auth` 默认偏松、Chroma 本机文件难水平扩展 |
 
 ## 如何继续展开
 
 - **双入口 RAG：** Agent 灵活多步；`/rag/ask` 固定 Prompt、返回 sources，适合合规文档 QA
-- **换模型：** 只改 `.env` 和 `config.py`；Embedding 维度变了要重建 FAISS
+- **换模型：** 只改 `.env` 和 `config.py`；Embedding 维度变了要重建向量索引
 - **扩展性：** 「加 weather 工具 = schema + handler + registry 一行」
 - **深入阅读：** [architecture.md](./architecture.md) · [backend.md](./backend.md)
 
@@ -144,7 +144,7 @@
 
 ### 30 秒版
 
-> Tool Calling 让 LLM 输出结构化「函数调用请求」，应用在本地执行后再把结果喂回去。我们用 `tools/registry.py` 注册工具：Planner 把 schema 发给 LLM，Executor 通过 `execute_tool` 执行。现有 **calculator**（安全算术）和 **search_docs**（FAISS 检索）。新增工具只需注册，不用改 Agent 循环。
+> Tool Calling 让 LLM 输出结构化「函数调用请求」，应用在本地执行后再把结果喂回去。我们用 `tools/registry.py` 注册工具：Planner 把 schema 发给 LLM，Executor 通过 `execute_tool` 执行。现有 **calculator**（安全算术）和 **search_docs**（Chroma 检索）。新增工具只需注册，不用改 Agent 循环。
 
 ### 2 分钟版
 
@@ -261,20 +261,20 @@ for step in 1..max_agent_steps:
 
 ### 30 秒版
 
-> RAG 是检索增强生成：先从知识库找相关片段，再让 LLM 带着片段回答，解决模型不知道私有数据、爱编造的问题。离线：PDF → 切块 → Embedding → FAISS；在线：问题 embed → Top-K 检索 → 拼 Prompt → LLM 生成。
+> RAG 是检索增强生成：先从知识库找相关片段，再让 LLM 带着片段回答，解决模型不知道私有数据、爱编造的问题。离线：PDF → 切块 → Embedding → Chroma；在线：问题 embed → Top-K 检索 → 拼 Prompt → LLM 生成。
 
 ### 2 分钟版
 
 **入库（`ingest.py`）：**
 ```
 PDF → loader.load_pdf → chunker.chunk_document
-    → embedder.embed_chunks → FaissVectorStore.add_embeddings → save
+    → embedder.embed_chunks → RagVectorStore.add_embeddings → save
 ```
 
 **问答（`chain.py` 六步）：**
 1. 接收问题
 2. embed 问题
-3. FAISS search Top-K
+3. Chroma search Top-K
 4. 得到 SearchResult
 5. `build_rag_messages` 拼 Prompt（system 要求「仅据资料，禁止编造」）
 6. `chat_completion(tools=None)` 生成答案
@@ -304,56 +304,57 @@ PDF → loader.load_pdf → chunker.chunk_document
 
 ---
 
-# 6. FAISS
+# 6. Chroma
 
 ## 面试官会问什么
 
-- 「FAISS 是什么？为什么用？」
+- 「Chroma 是什么？为什么用？」
 - 「向量存哪？原文存哪？」
-- 「IndexFlatIP 是什么？为什么 L2 归一化？」
-- 「和 Milvus / Chroma 怎么选？」
+- 「为什么要 L2 归一化？score 怎么算？」
+- 「和 Milvus / Qdrant 怎么选？」
 - 「换 Embedding 模型要注意什么？」
-- 「score 多少算相关？」
+- 「`faiss_id` 字段还在，是不是还用 FAISS？」
 
 ## 如何回答
 
 ### 30 秒版
 
-> FAISS 是 Meta 的向量相似度搜索库。向量存 `faiss.index`，原文和页码存 `metadata.json`。我们用 **IndexFlatIP** + **L2 归一化**，内积等价余弦相似度。query embed 后 search Top-K，再用向量 ID 查 metadata 取文本。
+> 我们用 **LangChain Chroma** 做嵌入式向量库：向量和 metadata 同库持久化到 `chroma.sqlite3`。入库/查询前做 **L2 归一化**，空间用 cosine，对外 `score = 1 - distance`。RAG 与长期记忆按用户分目录隔离；API 里的 `faiss_id` 只是历史字段名，实际是内部序号。
 
 ### 2 分钟版
 
-**磁盘结构（`rag/store/`）：**
+**磁盘结构（每用户一份）：**
 ```
-faiss.index      ← 纯向量
-metadata.json    ← chunk 原文、source、page
-uploads/         ← PDF 原文件
+rag/store/{user_id}/
+├── chroma.sqlite3
+└── <uuid>/          ← 分段向量数据
+uploads/             ← 原文件
 ```
 
-**写入：** numpy float32 → `normalize_L2` → `index.add` → metadata 同步追加
+**写入：** embed → L2 归一化 → `collection.add`（增量）→ 自动落盘
 
-**检索：** query 归一化 → `index.search(k)` → scores + indices → `SearchResult`
+**检索：** query 归一化 → cosine Top-K → 直接带回 documents / metadatas → `SearchResult`
 
-**选型：** IndexFlatIP 暴力精确搜索，O(n×d)，适合 demo 几千条；百万级换 IVF/HNSW 或 Milvus
+**选型：** 本机嵌入式、支持持久化与增量，适合 Demo/中小规模；百万级、多副本再迁 Milvus/Qdrant
 
-**换模型：** 维度可能变，必须重建索引，不能混用旧 faiss.index
+**换模型：** 维度可能变，必须清空对应用户目录并重建，不能混用旧向量
 
 ## 容易追问什么
 
 | 追问 | 要点 |
 |------|------|
-| FlatIP vs FlatL2？ | 我们归一化后用 IP = cosine；L2 是欧氏距离 |
-| 增量追加 PDF？ | add 追加模式；删文档当前未实现，需 rebuild |
-| metadata 不一致？ | load 时 ntotal != len(chunks) 抛错 |
-| GPU FAISS？ | 大规模 batch search 有用；demo CPU 够 |
+| 为什么归一化？ | 只比方向（语义），避免模长干扰；与 cosine 一致 |
+| 增量追加 PDF？ | `add_embeddings` 追加；按 `doc_id`/`source` 可 delete |
+| 为何保留 `faiss_id`？ | 兼容前端 / Eval JSON，值为 `seq_id`，不代表仍用 FAISS |
+| 多用户怎么隔离？ | `rag_store_path/{user_id}` 与 memory 目录物理分离 |
 | score 当置信度？ | 别当概率，看相对排序 + 人工定标 |
 
 ## 如何继续展开
 
-- **生产迁移：** Milvus/Qdrant 支持分布式、metadata filter、delete
-- **删除 PDF chunk：** Flat 索引难删单条；IDMap+remove_ids 或重建
-- **优化：** PQ 量化减内存、按 source 分索引
-- **深入阅读：** [faiss.md](./faiss.md)
+- **生产迁移：** Milvus/Qdrant 支持分布式、更强 filter、高可用
+- **删除文档：** Chroma 按 id 删除，比旧 Flat 索引重建更直接
+- **优化：** 文档路由（catalog）缩小检索范围；必要时加 Reranker
+- **深入阅读：** [chroma.md](./chroma.md) · [chroma-migration.md](./chroma-migration.md)
 
 ---
 
@@ -414,7 +415,7 @@ uploads/         ← PDF 原文件
 
 ## A. 1 分钟项目介绍（背诵版）
 
-> 我做了一个 AI Agent 助手，React 前端 + FastAPI 后端。核心是 ReAct Agent：模型思考后调 calculator 算数、调 search_docs 查上传的 PDF，看到结果再回答。文档走 RAG  pipeline，PDF 切块 Embedding 存 FAISS。多轮对话用 Session 记最近 10 轮。后端已经返回 ReAct 的 steps trace，前端侧边栏预留了可视化。模型用智谱 GLM，OpenAI 兼容 API。
+> 我做了一个 AI Agent 助手，React 前端 + FastAPI 后端。核心是 ReAct Agent：模型思考后调 calculator 算数、调 search_docs 查上传的 PDF，看到结果再回答。文档走 RAG  pipeline，PDF 切块 Embedding 存 Chroma。多轮对话用 Session 记最近 10 轮。后端已经返回 ReAct 的 steps trace，前端侧边栏预留了可视化。模型用智谱 GLM，OpenAI 兼容 API。
 
 ## B. 高频追问速查
 
@@ -424,9 +425,9 @@ uploads/         ← PDF 原文件
 | RAG vs Fine-tune | RAG 热更新知识；Fine-tune 改行为 |
 | search_docs vs rag_ask | 前者只检索给 Agent；后者固定 RAG 一次生成 |
 | 两种 Memory | Session 跨请求；AgentMemory 单次请求 |
-| 生产短板 | Session 内存、无鉴权、FAISS 规模、steps 未展示 |
+| 生产短板 | Session 内存、无鉴权、向量库规模、steps 未展示 |
 | 加工具 | schema + handler + registry |
-| 换模型 | 改 .env；Embedding 变则重建 FAISS |
+| 换模型 | 改 .env；Embedding 变则重建向量索引 |
 
 ## C. 演示建议（若要求 live demo）
 
@@ -447,7 +448,7 @@ uploads/         ← PDF 原文件
 | Tool Calling | [tool-calling.md](./tool-calling.md) |
 | ReAct | [react-agent.md](./react-agent.md) |
 | RAG | [rag.md](./rag.md) |
-| FAISS | [faiss.md](./faiss.md) |
+| Chroma | [chroma.md](./chroma.md) |
 | Memory | [memory.md](./memory.md) |
 | 前端 | [frontend.md](./frontend.md) |
 
